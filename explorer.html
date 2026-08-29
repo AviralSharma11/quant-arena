@@ -1,0 +1,689 @@
+<title>Quant Arena Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --paper:#FBFAF9; --surface:#FFFFFF; --sunken:#F2F1EE;
+  --ink:#1A1D23; --ink-2:#4A5058; --ink-3:#767C86;
+  --rule:#E1DFDA; --rule-2:#CFCCC5;
+  --accent:#9A5B12; --accent-soft:#F5EADC; --accent-line:#D9A868;
+  --bid:#2C6E52; --bid-soft:#E4EFE9;
+  --ask:#A63F36; --ask-soft:#F7E6E4;
+  --devA:#2F5E8C; --devA-soft:#E4EDF6;
+  --devB:#6B4A86; --devB-soft:#EEE7F4;
+  --shadow:0 1px 2px rgba(26,29,35,.05),0 6px 18px rgba(26,29,35,.06);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#12151A; --surface:#191D24; --sunken:#0D1014;
+    --ink:#E7E9EC; --ink-2:#A2AAB5; --ink-3:#727B87;
+    --rule:#272C34; --rule-2:#39404A;
+    --accent:#E0A253; --accent-soft:#2A2118; --accent-line:#7A5A2E;
+    --bid:#5FB98C; --bid-soft:#16241D;
+    --ask:#E0796D; --ask-soft:#2A1A18;
+    --devA:#79A9DA; --devA-soft:#16212C;
+    --devB:#B08ACB; --devB-soft:#221A2A;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#12151A; --surface:#191D24; --sunken:#0D1014;
+  --ink:#E7E9EC; --ink-2:#A2AAB5; --ink-3:#727B87;
+  --rule:#272C34; --rule-2:#39404A;
+  --accent:#E0A253; --accent-soft:#2A2118; --accent-line:#7A5A2E;
+  --bid:#5FB98C; --bid-soft:#16241D;
+  --ask:#E0796D; --ask-soft:#2A1A18;
+  --devA:#79A9DA; --devA-soft:#16212C;
+  --devB:#B08ACB; --devB-soft:#221A2A;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:Archivo,"Helvetica Neue",Arial,sans-serif;
+  font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1320px;margin:0 auto;padding:0 20px 64px}
+header.top{
+  border-bottom:1px solid var(--rule); background:var(--surface);
+  position:sticky; top:0; z-index:20;
+}
+.top-in{max-width:1320px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
+.brand h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0}
+.brand .sub{font-size:11.5px;color:var(--ink-3);letter-spacing:.09em;text-transform:uppercase}
+.tabs{display:flex;gap:2px;background:var(--sunken);padding:3px;border-radius:8px;border:1px solid var(--rule)}
+.tab{
+  appearance:none;border:0;background:transparent;color:var(--ink-2);
+  font:500 12.5px/1 Archivo,sans-serif; letter-spacing:.02em;
+  padding:8px 13px;border-radius:6px;cursor:pointer;white-space:nowrap;
+}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.themeBtn{
+  appearance:none;border:1px solid var(--rule-2);background:var(--surface);color:var(--ink-2);
+  width:32px;height:32px;border-radius:7px;cursor:pointer;font-size:14px;line-height:1;
+}
+.themeBtn:hover{color:var(--ink);border-color:var(--ink-3)}
+.themeBtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+.lede{padding:26px 0 20px;max-width:64ch}
+.lede h2{font-size:25px;font-weight:700;letter-spacing:-.02em;margin:0 0 8px;text-wrap:balance}
+.lede p{margin:0;color:var(--ink-2);font-size:15px}
+
+.panel[hidden]{display:none}
+
+/* ---------- architecture ---------- */
+.arch{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.95fr);gap:22px;align-items:start}
+@media(max-width:1020px){.arch{grid-template-columns:1fr}}
+.diagram-card{
+  background:var(--surface);border:1px solid var(--rule);border-radius:12px;
+  padding:8px 8px 4px;box-shadow:var(--shadow);overflow-x:auto;
+}
+svg.map{display:block;width:100%;height:auto;min-width:640px}
+.node{cursor:pointer}
+.node rect,.node path.shape{
+  fill:var(--surface);stroke:var(--rule-2);stroke-width:1.5;
+  transition:fill .13s ease,stroke .13s ease;
+}
+.node:hover rect,.node:hover path.shape{stroke:var(--accent);fill:var(--accent-soft)}
+.node.sel rect,.node.sel path.shape{stroke:var(--accent);stroke-width:2.5;fill:var(--accent-soft)}
+.node.lit rect,.node.lit path.shape{stroke:var(--accent);stroke-width:2.5;fill:var(--accent-soft)}
+.node text{pointer-events:none;fill:var(--ink)}
+.n-title{font:600 13px Archivo,sans-serif}
+.n-sub{font:400 10.5px "IBM Plex Mono",monospace;fill:var(--ink-3)}
+.node:focus-visible rect,.node:focus-visible path.shape{outline:none;stroke:var(--accent);stroke-width:3}
+.flowline{stroke:var(--rule-2);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+.flowline.dash{stroke-dasharray:5 4}
+.flowline.hot{stroke:var(--accent);stroke-width:2.6;marker-end:url(#ahHot)}
+.flab{font:400 9.5px "IBM Plex Mono",monospace;fill:var(--ink-3)}
+.store rect{fill:var(--sunken)}
+.hintbar{
+  display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+  padding:9px 10px 4px;font-size:11.5px;color:var(--ink-3);
+}
+.hintbar b{color:var(--ink-2);font-weight:500}
+
+/* ---------- detail panel ---------- */
+.detail{
+  background:var(--surface);border:1px solid var(--rule);border-radius:12px;
+  box-shadow:var(--shadow);position:sticky;top:82px;
+  max-height:calc(100vh - 110px);overflow-y:auto;
+}
+@media(max-width:1020px){.detail{position:static;max-height:none}}
+.detail-in{padding:20px}
+.d-eyebrow{
+  font:500 10.5px/1 "IBM Plex Mono",monospace;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--accent);margin-bottom:7px;
+}
+.detail h3{font-size:20px;font-weight:700;letter-spacing:-.015em;margin:0 0 3px;text-wrap:balance}
+.d-role{font-size:12.5px;color:var(--ink-3);margin:0 0 15px}
+.d-lead{font-size:14.5px;color:var(--ink);margin:0 0 16px}
+.d-sec{border-top:1px solid var(--rule);padding-top:13px;margin-top:14px}
+.d-sec h4{
+  font:500 10.5px/1 "IBM Plex Mono",monospace;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 9px;
+}
+.d-sec p{margin:0;font-size:13.5px;color:var(--ink-2)}
+.d-sec ul{margin:0;padding-left:17px;font-size:13.5px;color:var(--ink-2)}
+.d-sec li{margin-bottom:5px}
+.d-sec li::marker{color:var(--accent-line)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{
+  font:500 11px/1 "IBM Plex Mono",monospace;padding:5px 8px;border-radius:5px;
+  background:var(--sunken);border:1px solid var(--rule);color:var(--ink-2);
+}
+.owner{display:inline-flex;align-items:center;gap:6px;font:500 11.5px "IBM Plex Mono",monospace;
+  padding:5px 9px;border-radius:5px}
+.owner.a{background:var(--devA-soft);color:var(--devA);border:1px solid var(--devA)}
+.owner.b{background:var(--devB-soft);color:var(--devB);border:1px solid var(--devB)}
+.owner.j{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line)}
+.tasklist{display:flex;flex-wrap:wrap;gap:5px}
+.tk{font:500 11px/1 "IBM Plex Mono",monospace;padding:5px 7px;border-radius:5px;
+  background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line)}
+.empty{padding:40px 22px;text-align:center;color:var(--ink-3)}
+.empty .big{font-size:15px;color:var(--ink-2);margin-bottom:5px}
+
+/* ---------- flow ---------- */
+.flowgrid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.95fr);gap:22px;align-items:start}
+@media(max-width:1020px){.flowgrid{grid-template-columns:1fr}}
+.stepper{display:flex;gap:8px;align-items:center;padding:14px 2px 0;flex-wrap:wrap}
+.sbtn{
+  appearance:none;border:1px solid var(--rule-2);background:var(--surface);color:var(--ink);
+  font:500 12.5px Archivo,sans-serif;padding:8px 15px;border-radius:7px;cursor:pointer;
+}
+.sbtn:hover{border-color:var(--accent);color:var(--accent)}
+.sbtn:disabled{opacity:.4;cursor:default}
+.sbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.sdots{display:flex;gap:5px;margin-left:4px}
+.sdot{width:7px;height:7px;border-radius:50%;background:var(--rule-2);border:0;padding:0;cursor:pointer}
+.sdot[aria-current="true"]{background:var(--accent);transform:scale(1.35)}
+.scount{font:500 11.5px "IBM Plex Mono",monospace;color:var(--ink-3);margin-left:auto}
+
+/* ---------- split ---------- */
+.splitcols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:820px){.splitcols{grid-template-columns:1fr}}
+.devcard{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:18px;box-shadow:var(--shadow)}
+.devcard h3{margin:0 0 3px;font-size:17px;font-weight:700}
+.devcard .who{font:500 11px "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px}
+.devcard.a{border-top:3px solid var(--devA)} .devcard.a .who{color:var(--devA)}
+.devcard.b{border-top:3px solid var(--devB)} .devcard.b .who{color:var(--devB)}
+.wk{display:flex;gap:11px;padding:9px 0;border-top:1px solid var(--rule);font-size:13.5px}
+.wk:first-of-type{border-top:0}
+.wk .wn{font:600 11px "IBM Plex Mono",monospace;color:var(--ink-3);padding-top:2px;min-width:26px}
+.wk .wt{color:var(--ink-2)}
+.wk .wh{margin-left:auto;font:500 11px "IBM Plex Mono",monospace;color:var(--ink-3);padding-top:2px}
+.mechs{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:20px}
+.mech{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:10px;padding:15px 16px}
+.mech h4{margin:0 0 6px;font-size:14px;font-weight:600}
+.mech p{margin:0;font-size:13px;color:var(--ink-2)}
+.rulebox{
+  margin-top:20px;background:var(--accent-soft);border:1px solid var(--accent-line);
+  border-radius:10px;padding:16px 18px;
+}
+.rulebox .lbl{font:500 10.5px "IBM Plex Mono",monospace;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.rulebox p{margin:0;font-size:15px;font-weight:600;color:var(--ink)}
+
+/* ---------- timeline ---------- */
+.tl{display:flex;flex-direction:column;gap:9px}
+.tlrow{
+  display:grid;grid-template-columns:82px 1fr;gap:16px;align-items:start;
+  background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:15px 17px;
+}
+.tlrow .num{font:600 12px "IBM Plex Mono",monospace;color:var(--accent);letter-spacing:.06em}
+.tlrow .num small{display:block;color:var(--ink-3);font-weight:400;letter-spacing:0;margin-top:2px}
+.tlrow h4{margin:0 0 5px;font-size:15.5px;font-weight:600}
+.tlrow .out{margin:0 0 10px;font-size:13.5px;color:var(--ink-2)}
+.tlrow .demo{
+  font-size:12.5px;color:var(--ink-2);background:var(--sunken);
+  border-left:2px solid var(--bid);padding:7px 11px;border-radius:0 5px 5px 0;
+}
+.tlrow .demo b{color:var(--bid);font-weight:600}
+
+table.mini{border-collapse:collapse;width:100%;font-size:13px;margin-top:4px}
+table.mini th{
+  text-align:left;font:500 10.5px "IBM Plex Mono",monospace;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);padding:0 10px 7px 0;border-bottom:1px solid var(--rule);
+}
+table.mini td{padding:8px 10px 8px 0;border-bottom:1px solid var(--rule);color:var(--ink-2);vertical-align:top}
+table.mini td:first-child{color:var(--ink);font-weight:500;white-space:nowrap}
+.foot{margin-top:34px;padding-top:18px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink-3)}
+.foot code{font-family:"IBM Plex Mono",monospace;background:var(--sunken);padding:2px 5px;border-radius:4px;color:var(--ink-2)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <h1>Quant Arena</h1>
+      <span class="sub">System Explorer</span>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-panel="p-arch">Architecture</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="p-flow">Order flow</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="p-split">Who builds what</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="p-time">7 weeks</button>
+    </div>
+    <button class="themeBtn" id="themeBtn" title="Switch theme" aria-label="Switch theme">◐</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ ARCHITECTURE ============ -->
+<section class="panel" id="p-arch">
+  <div class="lede">
+    <h2>A simulated stock exchange, in eleven boxes</h2>
+    <p>Click any box to see what it does, what it is built with, and who builds it. Solid arrows are the path an order takes. Dashed arrows are components reading events back out.</p>
+  </div>
+
+  <div class="arch">
+    <div>
+      <div class="diagram-card">
+        <svg class="map" viewBox="0 0 960 560" role="img" aria-label="System architecture diagram">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,1 L9,5 L0,9 z" fill="var(--rule-2)"/>
+            </marker>
+            <marker id="ahHot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,1 L9,5 L0,9 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <!-- arrows: forward path -->
+          <path class="flowline" data-edge="browser-gateway" d="M205,86 L285,96"/>
+          <path class="flowline" data-edge="bots-gateway"    d="M205,205 L285,140"/>
+          <path class="flowline" data-edge="gateway-inbound" d="M385,142 L385,168"/>
+          <path class="flowline" data-edge="inbound-engine"  d="M385,214 L385,240"/>
+          <path class="flowline" data-edge="engine-outbound" d="M385,312 L385,342"/>
+          <path class="flowline" data-edge="outbound-ledger"   d="M485,352 C540,340 545,300 575,290"/>
+          <path class="flowline" data-edge="outbound-fanout"   d="M485,364 L575,364"/>
+          <path class="flowline" data-edge="outbound-archiver" d="M485,376 C540,388 545,430 575,440"/>
+          <path class="flowline dash" data-edge="outbound-gateway" d="M330,342 C270,320 265,180 300,142"/>
+          <path class="flowline" data-edge="ledger-pg"      d="M755,290 L805,290"/>
+          <path class="flowline" data-edge="archiver-pq"    d="M755,440 L805,440"/>
+          <path class="flowline" data-edge="pq-backtester"  d="M845,466 L845,494 L760,494"/>
+          <path class="flowline dash" data-edge="fanout-browser" d="M575,352 C500,300 300,110 205,74"/>
+
+          <text class="flab" x="215" y="80">orders</text>
+          <text class="flab" x="215" y="200">orders</text>
+          <text class="flab" x="393" y="162">writes</text>
+          <text class="flab" x="393" y="234">reads</text>
+          <text class="flab" x="393" y="336">writes</text>
+          <text class="flab" x="252" y="240">releases holds</text>
+          <text class="flab" x="330" y="180">live updates</text>
+
+          <!-- clients -->
+          <g class="node" data-id="browser" tabindex="0" role="button" aria-label="Browser">
+            <rect x="40" y="56" width="165" height="58" rx="8"/>
+            <text class="n-title" x="60" y="82">Browser</text>
+            <text class="n-sub" x="60" y="99">React · TypeScript</text>
+          </g>
+          <g class="node" data-id="bots" tabindex="0" role="button" aria-label="Robot traders">
+            <rect x="40" y="176" width="165" height="58" rx="8"/>
+            <text class="n-title" x="60" y="202">Robot traders</text>
+            <text class="n-sub" x="60" y="219">Python · real API</text>
+          </g>
+
+          <!-- pipeline -->
+          <g class="node" data-id="gateway" tabindex="0" role="button" aria-label="Gateway">
+            <rect x="285" y="70" width="200" height="72" rx="8"/>
+            <text class="n-title" x="305" y="98">Gateway</text>
+            <text class="n-sub" x="305" y="115">FastAPI · the only writer</text>
+            <text class="n-sub" x="305" y="130">checks · holds money</text>
+          </g>
+          <g class="node store" data-id="inbound" tabindex="0" role="button" aria-label="Inbound stream">
+            <rect x="285" y="168" width="200" height="46" rx="8"/>
+            <text class="n-title" x="305" y="190">Inbound stream</text>
+            <text class="n-sub" x="305" y="206">Redis · numbered, in order</text>
+          </g>
+          <g class="node" data-id="engine" tabindex="0" role="button" aria-label="Matching engine">
+            <rect x="285" y="240" width="200" height="72" rx="8"/>
+            <text class="n-title" x="305" y="268">Matching engine</text>
+            <text class="n-sub" x="305" y="285">C++20 · zero I/O</text>
+            <text class="n-sub" x="305" y="300">pairs buyers and sellers</text>
+          </g>
+          <g class="node store" data-id="outbound" tabindex="0" role="button" aria-label="Outbound stream">
+            <rect x="285" y="342" width="200" height="46" rx="8"/>
+            <text class="n-title" x="305" y="364">Outbound stream</text>
+            <text class="n-sub" x="305" y="380">Redis · what happened</text>
+          </g>
+
+          <!-- consumers -->
+          <g class="node" data-id="ledger" tabindex="0" role="button" aria-label="Ledger">
+            <rect x="575" y="262" width="180" height="56" rx="8"/>
+            <text class="n-title" x="593" y="287">Ledger</text>
+            <text class="n-sub" x="593" y="303">who owns what</text>
+          </g>
+          <g class="node" data-id="fanout" tabindex="0" role="button" aria-label="Fan-out">
+            <rect x="575" y="336" width="180" height="56" rx="8"/>
+            <text class="n-title" x="593" y="361">Fan-out</text>
+            <text class="n-sub" x="593" y="377">20 updates a second</text>
+          </g>
+          <g class="node" data-id="archiver" tabindex="0" role="button" aria-label="Archiver">
+            <rect x="575" y="412" width="180" height="56" rx="8"/>
+            <text class="n-title" x="593" y="437">Archiver</text>
+            <text class="n-sub" x="593" y="453">saves history</text>
+          </g>
+          <g class="node" data-id="backtester" tabindex="0" role="button" aria-label="Backtester">
+            <rect x="575" y="468" width="180" height="52" rx="8"/>
+            <text class="n-title" x="593" y="491">Backtester</text>
+            <text class="n-sub" x="593" y="507">tests trading ideas</text>
+          </g>
+
+          <!-- stores -->
+          <g class="node store" data-id="postgres" tabindex="0" role="button" aria-label="PostgreSQL">
+            <rect x="805" y="262" width="120" height="56" rx="8"/>
+            <text class="n-title" x="820" y="287">Database</text>
+            <text class="n-sub" x="820" y="303">a copy, for reading</text>
+          </g>
+          <g class="node store" data-id="parquet" tabindex="0" role="button" aria-label="History files">
+            <rect x="805" y="412" width="120" height="56" rx="8"/>
+            <text class="n-title" x="820" y="437">History</text>
+            <text class="n-sub" x="820" y="453">Parquet files</text>
+          </g>
+        </svg>
+        <div class="hintbar">
+          <span><b>Solid</b> — the path an order takes</span>
+          <span><b>Dashed</b> — reading events back out</span>
+          <span><b>Shaded</b> — stores data</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="detail"><div class="detail-in" id="detailBody"></div></aside>
+  </div>
+</section>
+
+<!-- ============ ORDER FLOW ============ -->
+<section class="panel" id="p-flow" hidden>
+  <div class="lede">
+    <h2>What happens when Riya buys</h2>
+    <p>She has ₹1,00,000 of virtual money and wants 50 units of <span class="mono">QA-TECH</span> at ₹102 or less. Step through it — the highlighted box is where the action is.</p>
+  </div>
+
+  <div class="flowgrid">
+    <div>
+      <div class="diagram-card">
+        <svg class="map" viewBox="0 0 960 560" id="flowSvg" role="img" aria-label="Order flow diagram"></svg>
+        <div class="hintbar"><span><b>Highlighted</b> — active in this step</span></div>
+      </div>
+      <div class="stepper">
+        <button class="sbtn" id="prevBtn">← Back</button>
+        <button class="sbtn" id="nextBtn">Next →</button>
+        <div class="sdots" id="dots"></div>
+        <span class="scount" id="scount"></span>
+      </div>
+    </div>
+    <aside class="detail"><div class="detail-in" id="flowBody"></div></aside>
+  </div>
+</section>
+
+<!-- ============ SPLIT ============ -->
+<section class="panel" id="p-split" hidden>
+  <div class="lede">
+    <h2>Two developers, never waiting on each other</h2>
+    <p>The split is arranged so that no task ever depends on a task the other developer is doing <em>in the same week</em>. Cross-arrows always point backwards in time.</p>
+  </div>
+
+  <div class="splitcols">
+    <div class="devcard a">
+      <div class="who">Dev A</div>
+      <h3>The exchange core</h3>
+      <div id="devAweeks"></div>
+    </div>
+    <div class="devcard b">
+      <div class="who">Dev B</div>
+      <h3>The platform</h3>
+      <div id="devBweeks"></div>
+    </div>
+  </div>
+
+  <div class="mechs">
+    <div class="mech">
+      <h4>1 · One joint session, day one</h4>
+      <p>Both write the event schema, the REST paths and the WebSocket message shapes together. Half a day, and it is the only time they must work in lockstep.</p>
+    </div>
+    <div class="mech">
+      <h4>2 · Stub first, integrate later</h4>
+      <p>Three stubs, about an hour each: a stub engine, a mock WebSocket server, and a handful of sample history files. Each lets one developer start before the other has finished.</p>
+    </div>
+    <div class="mech">
+      <h4>3 · Swap the stub at week's end</h4>
+      <p>Short joint sessions where a stub is replaced by the real thing. End of week 2, end of week 5, start of week 7.</p>
+    </div>
+  </div>
+
+  <div class="rulebox">
+    <div class="lbl">The rule to check against</div>
+    <p>No task may depend on a task assigned to the other developer in the same week.</p>
+  </div>
+
+  <div class="d-sec" style="margin-top:24px">
+    <h4>What was blocking before</h4>
+    <table class="mini">
+      <tr><th>Where</th><th>The problem</th><th>Fix</th></tr>
+      <tr><td>Week 1</td><td>Gateway needed the schema <em>and</em> the naive engine before it could start</td><td>Schema becomes a joint task; gateway builds against a stub engine</td></tr>
+      <tr><td>Week 5</td><td>Frontend needed fan-out, in the same week</td><td>Frontend builds against a mock WebSocket server</td></tr>
+      <tr><td>Weeks 4–5</td><td>Fan-out was listed as needing the C++ engine</td><td>A mistake in the plan — fan-out needs the <em>stream</em>, which exists from week 2</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============ TIMELINE ============ -->
+<section class="panel" id="p-time" hidden>
+  <div class="lede">
+    <h2>Seven weeks to a working exchange</h2>
+    <p>Every week ends with something you can actually show someone. That is deliberate — the system is demonstrable from week 1 and stays that way.</p>
+  </div>
+  <div class="tl" id="tlBody"></div>
+</section>
+
+<div class="foot">
+  Deeper reading — <code>ARCHITECTURE.md</code> for how it works · <code>WEEKLY_PLAN.md</code> for the build plan and Appendix D for the developer split · <code>open-issues/001–019</code> for why each decision was made.
+</div>
+</div>
+
+<script>
+const C = {
+  browser:{name:"Browser",role:"What a person sees",owner:"a",
+    lead:"The trading screen: the order book, the running list of trades, a price chart, a form to place orders, and your portfolio.",
+    does:["Shows the market updating live — no page refresh, ever","Lets you place and cancel orders","Shows your cash, holdings and open orders as they change"],
+    tech:["React","TypeScript","Vite","Lightweight Charts","WebSocket"],
+    why:"Book updates arrive 20 times a second. If React re-rendered on every one, the page would stutter. So fast-moving data is kept <em>outside</em> React and painted on the browser's own frame loop instead.",
+    tasks:["5.4","6.1","7.2"]},
+
+  bots:{name:"Robot traders",role:"Where the market comes from",owner:"b",
+    lead:"With three friends using the site the order book would be empty and nothing would ever trade. Robots fix that — and they log in and place orders through the same API as everyone else.",
+    does:["A market maker always offers to buy and to sell, so there is always someone to trade with","Noise traders buy and sell at random, creating movement","Prices follow real crypto history, replayed at one real second per simulated minute"],
+    tech:["Python","httpx","Binance public data"],
+    why:"They do three jobs at once: they make the market look alive, they are the load generator for performance testing, and they generate the history the research tools study.",
+    tasks:["4.4","5.1"]},
+
+  gateway:{name:"Gateway",role:"The front door",owner:"b",
+    lead:"Everything enters here. It checks who you are, checks you can afford the order, sets the money aside, and writes the order down.",
+    does:["Login and sessions","Checks the order makes sense — sensible size, price on the right grid","Sets aside your money <em>before</em> the order goes anywhere","Spots duplicate submissions and refuses to create a second order","Writes every request into the inbound stream"],
+    tech:["FastAPI","uvicorn","Redis","PostgreSQL","argon2"],
+    why:"It is the <em>only</em> program that writes to the stream, and it does one thing at a time. That is what makes it impossible for two orders to slip past each other and overspend the same money.",
+    tasks:["1.3","3.1","3.2"]},
+
+  inbound:{name:"Inbound stream",role:"The numbered to-do list",owner:"b",
+    lead:"Every request, written down in order and numbered. Nothing is ever erased.",
+    does:["Gives every request a number, which becomes its place in the queue","Survives a crash — an order is only confirmed after it is safely stored","Keeps roughly the last 2 million entries"],
+    tech:["Redis Streams"],
+    why:"One numbered list is what makes fairness possible. Everyone agrees what happened first, so nobody's order can be quietly skipped.",
+    tasks:["2.1"]},
+
+  engine:{name:"Matching engine",role:"The clerk",owner:"a",
+    lead:"Reads orders one at a time and decides who trades with whom. Better price wins; if prices are equal, whoever arrived first wins.",
+    does:["Keeps the order book — every waiting buy and sell","Pairs orders that fit and works out the trade","Handles partial fills — asking for 50 and getting 30 is normal","Handles cancellations"],
+    tech:["C++20","CMake","Catch2","nanobind"],
+    why:"The only part with <strong>no reading or writing of anything</strong> — no network, no database, no files. That is what makes it both very fast and easy to test. It also does not know money exists.",
+    tasks:["2.4","3.4","4.2","4.3"]},
+
+  outbound:{name:"Outbound stream",role:"The record of what happened",owner:"b",
+    lead:"Every result the engine produces: orders accepted, trades done, orders cancelled, the book changed.",
+    does:["Records every outcome, numbered and in order","Four different programs read it, each at its own pace","Is the source of truth for money — the database is only a copy"],
+    tech:["Redis Streams"],
+    why:"Everything downstream is worked out from this one list. Nothing has its own private version of the truth, so there is nothing to reconcile.",
+    tasks:["2.1","4.2"]},
+
+  ledger:{name:"Ledger",role:"Who owns what",owner:"b",
+    lead:"Reads the outbound stream and works out everyone's cash and holdings.",
+    does:["Moves cash and units between buyer and seller on every trade","Charges the trading fee into a house account","Rebuilds every balance from scratch by re-reading the stream when it restarts"],
+    tech:["Python","Redis","PostgreSQL","SQLModel"],
+    why:"It never invents a balance — it only ever derives one. If the database and the stream ever disagree, the stream wins and the database is rebuilt.",
+    tasks:["2.2"]},
+
+  fanout:{name:"Fan-out",role:"Pushes updates to screens",owner:"b",
+    lead:"Takes what happened and sends it to every browser watching, 20 times a second.",
+    does:["Sends you only the symbols you are watching","Combines a burst of changes into one current picture","Builds each message once and sends the same bytes to everyone","Skips anyone whose connection is lagging — the next picture fixes them"],
+    tech:["Python","WebSocket","Redis Streams"],
+    why:"20,000 events a second × 500 people is 10 million messages a second, which is impossible. So the real design question is not how to send fast — it is <strong>what to decide not to send</strong>.",
+    tasks:["5.2"]},
+
+  archiver:{name:"Archiver",role:"Saves history",owner:"b",
+    lead:"Reads the outbound stream and writes trades, price bars and periodic snapshots of the book to files.",
+    does:["Saves every trade","Builds one-second and one-minute price bars","Saves a picture of the order book once a second"],
+    tech:["Python","Parquet","pyarrow"],
+    why:"Turns a fast-moving stream into files that are convenient to study. The backtester reads these files directly.",
+    tasks:["6.2"]},
+
+  backtester:{name:"Backtester",role:"Tests a trading idea",owner:"a",
+    lead:"Replays past prices, pretends to follow a trading rule, and reports what would have happened.",
+    does:["Feeds prices forward one step at a time","Asks the strategy: buy, sell, or do nothing?","Reports profit, win rate, worst dip, and how it compares to simply buying and holding"],
+    tech:["Python","Parquet","numpy"],
+    why:"Prices are fed one step at a time so a strategy is <em>physically unable</em> to peek at tomorrow. Accidentally seeing the future is the most common way a backtest ends up quietly wrong.",
+    tasks:["7.1","7.2"]},
+
+  postgres:{name:"Database",role:"A convenient copy",owner:"b",
+    lead:"Holds account pages, trade history and balances — for showing on screen.",
+    does:["Serves account and history pages","Can be thrown away and rebuilt from the stream at any time"],
+    tech:["PostgreSQL","SQLModel"],
+    why:"<strong>Never the source of truth.</strong> It is a copy kept for convenience. Everything in it can be recreated by re-reading the outbound stream.",
+    tasks:["1.3","2.2"]},
+
+  parquet:{name:"History files",role:"Where the past lives",owner:"b",
+    lead:"Trades, price bars and book snapshots, saved as compressed files organised by symbol and day.",
+    does:["Stores history beyond what the stream keeps","Is read directly by the backtester"],
+    tech:["Parquet","pyarrow"],
+    why:"Columnar files are compact and quick to read in bulk — which is exactly how a backtest reads them, and nothing like how a database is designed to be used.",
+    tasks:["6.2"]}
+};
+
+const FLOW = [
+  {t:"Riya places the order",lit:["browser","gateway"],edges:["browser-gateway"],
+   body:"She types <b>BUY 50 @ ₹102</b> and hits submit. The request goes to the gateway.",
+   note:"50 × ₹102 = ₹5,100 — that is the most she could possibly spend."},
+  {t:"The gateway checks it",lit:["gateway"],edges:[],
+   body:"Is this a real order? Sensible quantity, price on the right grid, a symbol that exists. Then: can she afford ₹5,100? She has ₹1,00,000, so yes.",
+   note:"A bad order is rejected here and never reaches the engine."},
+  {t:"The money is set aside — now",lit:["gateway"],edges:[],
+   body:"₹5,100 is held immediately, <b>before the order goes anywhere</b>. Her spendable balance drops to ₹94,900 right away.",
+   note:"This is the single most important step. Do it later and two quick orders could both pass the check and overspend the same money."},
+  {t:"The order is written down",lit:["gateway","inbound"],edges:["gateway-inbound"],
+   body:"The order joins the inbound stream and gets a number. Only once it is safely stored does Riya get a reply.",
+   note:"The reply says <b>accepted</b>, not <b>done</b>. Whether it trades is a separate question, answered a moment later."},
+  {t:"The engine matches it",lit:["inbound","engine"],edges:["inbound-engine"],
+   body:"Riya will pay up to ₹102. The best seller wants exactly ₹102 and has 30 units. That fits — <b>30 units trade at ₹102</b>.",
+   note:"She wanted 50 and got 30. The other 20 join the book and wait. This is called a partial fill and it is completely normal."},
+  {t:"The result is recorded",lit:["engine","outbound"],edges:["engine-outbound"],
+   body:"The engine writes what happened: a trade of 30 at ₹102, and 20 units now resting on the book.",
+   note:"The engine's job ends here. It does not know about money, and it does not tell anyone — it just writes down what happened."},
+  {t:"Four programs react",lit:["outbound","gateway","ledger","fanout","archiver"],
+   edges:["outbound-ledger","outbound-fanout","outbound-archiver","outbound-gateway"],
+   body:"The <b>gateway</b> converts part of the hold into a real spend. The <b>ledger</b> updates her cash and holdings. <b>Fan-out</b> prepares the update. The <b>archiver</b> files it away.",
+   note:"None of them can slow the engine down, because none of them are in its path. They are all just reading a list."},
+  {t:"Everyone's screen updates",lit:["fanout","browser"],edges:["fanout-browser"],
+   body:"Riya sees the fill and her new balance. The seller sees the sale. Everyone watching QA-TECH sees the book redraw and a new point on the chart.",
+   note:"Nobody pressed refresh. The price of QA-TECH just moved from about ₹100 to ₹102."}
+];
+
+const WEEKS = [
+  {n:1,title:"Foundations",out:"The contract everything is written against, plus a first order travelling end to end.",
+   demo:"<b>Show it:</b> one command starts everything; an order goes in and comes out matched.",
+   a:"Joint contract session · naive engine · matching scenarios",ah:"18h",
+   b:"Joint contract session · gateway on a stub engine · Docker stack",bh:"29h"},
+  {n:2,title:"Durable event flow and money",out:"The stream becomes real, and balances are worked out from it rather than written directly.",
+   demo:"<b>Show it:</b> kill the ledger, restart it, watch every balance rebuild itself exactly.",
+   a:"C++ engine — order book and matching",ah:"24h",
+   b:"Redis streams · ledger",bh:"30h"},
+  {n:3,title:"Risk, duplicates, a complete engine",out:"The money path becomes safe and the site goes public.",
+   demo:"<b>Show it:</b> submit the same order twice — exactly one order exists.",
+   a:"Engine complete + Python binding · deploy and CI",ah:"25h",
+   b:"Risk checks and holds · duplicate protection",bh:"27h"},
+  {n:4,title:"Proof",out:"Two independently written engines are shown to agree, across thousands of random cases.",
+   demo:"<b>Show it:</b> 10,000 generated scenarios, both engines byte-for-byte identical.",
+   a:"Differential and property tests",ah:"24h",
+   b:"Robot traders · fan-out begins",bh:"30h"},
+  {n:5,title:"A market that is alive",out:"Ten symbols moving on real price history, pushed live to browsers.",
+   demo:"<b>Show it:</b> prices tick, trades print, the book moves on its own.",
+   a:"Engine as its own process · speed benchmark · frontend on a mock feed",ah:"26h",
+   b:"Fan-out finished · crypto prices, ten symbols",bh:"26h"},
+  {n:6,title:"The product",out:"The trading screen — the thing people actually use.",
+   demo:"<b>Show it:</b> place an order and watch your portfolio change without refreshing.",
+   a:"Trading screen — book, tape, chart, ticket, portfolio",ah:"30h",
+   b:"Archiver · load generator · duplicate injection · crash-recovery script",bh:"27h"},
+  {n:7,title:"Research and evidence",out:"Backtesting works, and the performance report is written honestly.",
+   demo:"<b>Show it:</b> kill the engine mid-trade and watch it recover with nothing lost.",
+   a:"Backtester · backtest screen · integration tests",ah:"25h",
+   b:"Benchmarks, trace tool, report · hardening",bh:"27h"}
+];
+
+/* ---------- theme ---------- */
+const tb=document.getElementById('themeBtn');
+tb.addEventListener('click',()=>{
+  const cur=document.documentElement.getAttribute('data-theme');
+  const dark=cur?cur==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
+  document.documentElement.setAttribute('data-theme',dark?'light':'dark');
+});
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',String(x===t)));
+    document.querySelectorAll('.panel').forEach(p=>p.hidden=(p.id!==t.dataset.panel));
+    if(t.dataset.panel==='p-flow') renderFlow();
+  });
+});
+
+/* ---------- detail panel ---------- */
+function ownerTag(o){
+  if(o==='a') return '<span class="owner a">DEV A</span>';
+  if(o==='b') return '<span class="owner b">DEV B</span>';
+  return '<span class="owner j">JOINT</span>';
+}
+function showDetail(id){
+  const c=C[id]; if(!c) return;
+  document.getElementById('detailBody').innerHTML=`
+    <div class="d-eyebrow">${c.role}</div>
+    <h3>${c.name}</h3>
+    <p class="d-role">${ownerTag(c.owner)}</p>
+    <p class="d-lead">${c.lead}</p>
+    <div class="d-sec"><h4>What it does</h4><ul>${c.does.map(d=>`<li>${d}</li>`).join('')}</ul></div>
+    <div class="d-sec"><h4>Built with</h4><div class="chips">${c.tech.map(t=>`<span class="chip">${t}</span>`).join('')}</div></div>
+    <div class="d-sec"><h4>Why it works this way</h4><p>${c.why}</p></div>
+    <div class="d-sec"><h4>Built in tasks</h4><div class="tasklist">${c.tasks.map(t=>`<span class="tk">${t}</span>`).join('')}</div></div>`;
+  document.querySelectorAll('#p-arch .node').forEach(n=>n.classList.toggle('sel',n.dataset.id===id));
+}
+function emptyDetail(){
+  document.getElementById('detailBody').innerHTML=
+    `<div class="empty"><div class="big">Pick a box</div><div>Every component tells you what it does, what it is built with, and who builds it.</div></div>`;
+}
+emptyDetail();
+document.querySelectorAll('#p-arch .node').forEach(n=>{
+  n.addEventListener('click',()=>showDetail(n.dataset.id));
+  n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();showDetail(n.dataset.id);}});
+});
+
+/* ---------- flow ---------- */
+let step=0;
+const flowSvg=document.getElementById('flowSvg');
+flowSvg.innerHTML=document.querySelector('#p-arch svg.map').innerHTML;
+flowSvg.querySelectorAll('.node').forEach(n=>{n.removeAttribute('tabindex');n.style.cursor='default';});
+
+function renderFlow(){
+  const s=FLOW[step];
+  flowSvg.querySelectorAll('.node').forEach(n=>n.classList.toggle('lit',s.lit.includes(n.dataset.id)));
+  flowSvg.querySelectorAll('.flowline').forEach(e=>e.classList.toggle('hot',s.edges.includes(e.dataset.edge)));
+  document.getElementById('flowBody').innerHTML=`
+    <div class="d-eyebrow">Step ${step+1} of ${FLOW.length}</div>
+    <h3>${s.t}</h3>
+    <p class="d-lead" style="margin-top:10px">${s.body}</p>
+    <div class="d-sec"><h4>Worth noticing</h4><p>${s.note}</p></div>`;
+  document.getElementById('prevBtn').disabled=step===0;
+  document.getElementById('nextBtn').disabled=step===FLOW.length-1;
+  document.getElementById('scount').textContent=`${step+1} / ${FLOW.length}`;
+  document.querySelectorAll('#dots .sdot').forEach((d,i)=>d.setAttribute('aria-current',String(i===step)));
+}
+document.getElementById('dots').innerHTML=FLOW.map((_,i)=>
+  `<button class="sdot" aria-label="Step ${i+1}"></button>`).join('');
+document.querySelectorAll('#dots .sdot').forEach((d,i)=>
+  d.addEventListener('click',()=>{step=i;renderFlow();}));
+document.getElementById('nextBtn').addEventListener('click',()=>{if(step<FLOW.length-1){step++;renderFlow();}});
+document.getElementById('prevBtn').addEventListener('click',()=>{if(step>0){step--;renderFlow();}});
+
+/* ---------- split ---------- */
+document.getElementById('devAweeks').innerHTML=WEEKS.map(w=>
+  `<div class="wk"><span class="wn">W${w.n}</span><span class="wt">${w.a}</span><span class="wh">${w.ah}</span></div>`).join('');
+document.getElementById('devBweeks').innerHTML=WEEKS.map(w=>
+  `<div class="wk"><span class="wn">W${w.n}</span><span class="wt">${w.b}</span><span class="wh">${w.bh}</span></div>`).join('');
+
+/* ---------- timeline ---------- */
+document.getElementById('tlBody').innerHTML=WEEKS.map(w=>`
+  <div class="tlrow">
+    <div class="num">WEEK ${w.n}<small>${w.ah} + ${w.bh}</small></div>
+    <div>
+      <h4>${w.title}</h4>
+      <p class="out">${w.out}</p>
+      <div class="demo">${w.demo}</div>
+    </div>
+  </div>`).join('');
+</script>
