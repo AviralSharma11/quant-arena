@@ -396,12 +396,14 @@ table.mini td:first-child{color:var(--ink);font-weight:500;white-space:nowrap}
   <div class="splitcols">
     <div class="devcard a">
       <div class="who">Dev A</div>
-      <h3>The exchange core</h3>
+      <h3>Engine · correctness · performance</h3>
+      <p style="margin:0 0 12px;font-size:13px;color:var(--ink-3)">134 hours · no frontend, no infrastructure</p>
       <div id="devAweeks"></div>
     </div>
     <div class="devcard b">
       <div class="who">Dev B</div>
-      <h3>The platform</h3>
+      <h3>Platform &amp; product</h3>
+      <p style="margin:0 0 12px;font-size:13px;color:var(--ink-3)">234 hours · carries 64% of the work</p>
       <div id="devBweeks"></div>
     </div>
   </div>
@@ -453,7 +455,7 @@ table.mini td:first-child{color:var(--ink);font-weight:500;white-space:nowrap}
 
 <script>
 const C = {
-  browser:{name:"Browser",role:"What a person sees",owner:"a",
+  browser:{name:"Browser",role:"What a person sees",owner:"b",
     lead:"The trading screen: the order book, the running list of trades, a price chart, a form to place orders, and your portfolio.",
     does:["Shows the market updating live — no page refresh, ever","Lets you place and cancel orders","Shows your cash, holdings and open orders as they change"],
     tech:["React","TypeScript","Vite","Lightweight Charts","WebSocket"],
@@ -516,7 +518,7 @@ const C = {
     why:"Turns a fast-moving stream into files that are convenient to study. The backtester reads these files directly.",
     tasks:["6.2"]},
 
-  backtester:{name:"Backtester",role:"Tests a trading idea",owner:"a",
+  backtester:{name:"Backtester",role:"Tests a trading idea",owner:"b",
     lead:"Replays past prices, pretends to follow a trading rule, and reports what would have happened.",
     does:["Feeds prices forward one step at a time","Asks the strategy: buy, sell, or do nothing?","Reports profit, win rate, worst dip, and how it compares to simply buying and holding"],
     tech:["Python","Parquet","numpy"],
@@ -570,31 +572,31 @@ const WEEKS = [
   {n:1,title:"Foundations",out:"The contract everything is written against, plus a first order travelling end to end.",
    demo:"<b>Show it:</b> one command starts everything; an order goes in and comes out matched.",
    a:"Joint contract session · naive engine · matching scenarios",ah:"18h",
-   b:"Joint contract session · gateway on a stub engine · Docker stack",bh:"29h"},
+   b:"Joint contract session · gateway on a stub engine · Docker stack · frontend scaffold",bh:"35h"},
   {n:2,title:"Durable event flow and money",out:"The stream becomes real, and balances are worked out from it rather than written directly.",
    demo:"<b>Show it:</b> kill the ledger, restart it, watch every balance rebuild itself exactly.",
-   a:"C++ engine — order book and matching",ah:"24h",
-   b:"Redis streams · ledger",bh:"30h"},
+   a:"C++ engine — order book and matching",ah:"18h",
+   b:"Redis streams · ledger · auth screens",bh:"35h"},
   {n:3,title:"Risk, duplicates, a complete engine",out:"The money path becomes safe and the site goes public.",
    demo:"<b>Show it:</b> submit the same order twice — exactly one order exists.",
-   a:"Engine complete + Python binding · deploy and CI",ah:"25h",
-   b:"Risk checks and holds · duplicate protection",bh:"27h"},
+   a:"Engine complete + Python binding",ah:"15h",
+   b:"Risk checks and holds · duplicate protection · deploy and CI",bh:"37h"},
   {n:4,title:"Proof",out:"Two independently written engines are shown to agree, across thousands of random cases.",
    demo:"<b>Show it:</b> 10,000 generated scenarios, both engines byte-for-byte identical.",
-   a:"Differential and property tests",ah:"24h",
-   b:"Robot traders · fan-out begins",bh:"30h"},
+   a:"Differential, property and determinism tests",ah:"24h",
+   b:"Robot traders · fan-out begins · WebSocket client and frame loop",bh:"35h"},
   {n:5,title:"A market that is alive",out:"Ten symbols moving on real price history, pushed live to browsers.",
    demo:"<b>Show it:</b> prices tick, trades print, the book moves on its own.",
-   a:"Engine as its own process · speed benchmark · frontend on a mock feed",ah:"26h",
-   b:"Fan-out finished · crypto prices, ten symbols",bh:"26h"},
+   a:"Engine as its own process · speed benchmark · crash-recovery script",ah:"21h",
+   b:"Fan-out finished · crypto prices, ten symbols · trading screen begins",bh:"36h"},
   {n:6,title:"The product",out:"The trading screen — the thing people actually use.",
    demo:"<b>Show it:</b> place an order and watch your portfolio change without refreshing.",
-   a:"Trading screen — book, tape, chart, ticket, portfolio",ah:"30h",
-   b:"Archiver · load generator · duplicate injection · crash-recovery script",bh:"27h"},
+   a:"Open-loop load generator · duplicate injection",ah:"14h",
+   b:"Trading screen finished · archiver",bh:"28h"},
   {n:7,title:"Research and evidence",out:"Backtesting works, and the performance report is written honestly.",
    demo:"<b>Show it:</b> kill the engine mid-trade and watch it recover with nothing lost.",
-   a:"Backtester · backtest screen · integration tests",ah:"25h",
-   b:"Benchmarks, trace tool, report · hardening",bh:"27h"}
+   a:"Benchmarks, trace tool, report · joint definition-of-done walk",ah:"24h",
+   b:"Backtester · backtest screen · integration tests · joint definition-of-done walk",bh:"28h"}
 ];
 
 /* ---------- theme ---------- */

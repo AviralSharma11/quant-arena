@@ -2,7 +2,8 @@
 
 **Quant Arena — Phase 1**
 **Window:** 28 August – 15 October 2026 (7 weeks) · **Team:** 2 developers, full-time
-**Estimated work:** ~345 hours against ~430 effective hours
+**Estimated work:** ~368 hours against ~430 effective hours
+**Split:** Dev A 134 h · Dev B 234 h — see Appendix D
 
 ---
 
@@ -32,10 +33,15 @@ The split is **not** by subsystem alone. It is arranged so that **no task ever w
 assigned to the other developer in the same week.** Appendix D contains the full analysis, the
 three mechanisms that make it work, and the week-by-week assignment.
 
-- **Dev A — the exchange core:** schema and codegen, naive model, C++ engine, engine process,
-  the testing programme, deployment and CI, frontend, backtester.
-- **Dev B — the platform:** gateway, streams, ledger, risk, idempotency, bots, fan-out, archiver,
-  load generation, benchmarks, hardening.
+- **Dev A — engine, correctness, performance:** schema and codegen, naive model, C++ engine,
+  engine process, the testing programme, load generation, benchmarks and the report. **134 hours.**
+  No frontend, no infrastructure — every task is engine, proof, or measurement.
+- **Dev B — platform and product:** gateway, streams, ledger, risk, idempotency, bots, fan-out,
+  archiver, frontend, backtester, deployment, integration tests. **234 hours.**
+
+Dev B carries 64% of the work by design, and the schedule risk concentrates there — see
+Appendix D.3. Dev A's spare capacity has a high-value use: optimising the C++ engine, which is
+safe precisely because the differential harness catches any change that breaks correctness.
 
 Three rules make this parallel-safe:
 
@@ -52,35 +58,38 @@ Three rules make this parallel-safe:
 Arrows crossing between developers always point to a **previous** week, never the current one.
 
 ```
-WEEK 1   [JOINT] 1.1 contracts
-             │
-    A ───────┼──► 1.2 naive model ──► 2.3 scenarios
-    B ───────┴──► 1.3 gateway (stub engine) ──► 1.4 docker stack
+WEEK 1   [JOINT] 1.1 contracts  ──  schema · REST surface · WebSocket messages
+    A ──► 1.2 naive model ──► 2.3 scenarios
+    B ──► 1.3 gateway (stub engine) ──► 1.4 docker stack ──► 5.4a frontend scaffold
 
 WEEK 2   A ──► 2.4 C++ engine core
-         B ──► 2.1 Redis streams ──► 2.2 ledger
+         B ──► 2.1 Redis streams ──► 2.2 ledger        B ──► 5.4b auth screens
          [INTEGRATE] stub engine → naive model over the real stream
 
-WEEK 3   A ──► 3.4 engine + nanobind        A ──► 3.3 deploy + CI
-         B ──► 3.1 risk ──► 3.2 idempotency
+WEEK 3   A ──► 3.4 engine complete + nanobind
+         B ──► 3.1 risk ──► 3.2 idempotency            B ──► 3.3 deploy + CI
 
 WEEK 4   A ──► 4.1 differential + property tests
-         B ──► 4.4 bots            B ──► 5.2 fan-out (starts)
+         B ──► 4.4 bots      B ──► 5.2a fan-out        B ──► 5.4c WS client + rAF
 
-WEEK 5   A ──► 4.2 engine process ──► 4.3 benchmark   A ──► 5.4 frontend (mock WS)
-         B ──► 5.2 fan-out (finishes)                 B ──► 5.1 crypto prices, 10 symbols
+WEEK 5   A ──► 4.2 engine process ──► 4.3 benchmark ──► 5.3 recovery script
+         B ──► 5.2b fan-out done   B ──► 5.1 crypto prices   B ──► 6.1a trading screen
          [INTEGRATE] mock WS → real fan-out;  naive model → C++ engine process
 
-WEEK 6   A ──► 6.1 trading screen
-         B ──► 6.2 archiver · 6.3 load generator · 6.4 duplicates · 5.3 recovery script
+WEEK 6   A ──► 6.3 load generator ──► 6.4 duplicate injection
+         B ──► 6.1b trading screen done   B ──► 6.2 archiver
 
-WEEK 7   A ──► 7.1 backtester ──► 7.2 backtest screen ──► 7.3 integration tests
-         B ──► 7.4 benchmarks + trace + report ──► 7.5 hardening + definition of done
+WEEK 7   A ──► 7.4 benchmarks + trace + report
+         B ──► 7.1 backtester ──► 7.2 backtest screen   B ──► 7.3 integration tests
+         [JOINT] 7.5 definition-of-done walk
 ```
 
 ### Assumptions
 
-1. Deadline 15 October 2026; two developers full-time; ~345 h of work against ~430 h capacity.
+1. Deadline 15 October 2026; two developers full-time. **~368 h of work against ~430 h
+   capacity.** Open Issue 018 §13.5 put the figure at ~345 h from a top-down pass; summing the
+   per-task estimates in Appendix D gives 368 h. The bottom-up number is the one this schedule
+   actually contains, so it is the one used here.
 2. Architecture per `open-issues/001`–`019`, superseding `README.md` where they differ.
 3. All ten technology choices in Open Issue 019 adopted as recommended. Deployment **target**
    (single VM versus managed platform) remains deferred to week 3.
@@ -1596,17 +1605,20 @@ against what is agreed here.
 ### 2. Stub first, integrate later
 
 Where a component's upstream does not exist yet, it is built against a stub agreed in the
-contract session. **There are exactly three**, and each costs about an hour:
+contract session.
 
-| Stub | Built by | Replaces | Swapped at |
-|---|---|---|---|
-| **Stub engine** — accepts an order, returns canned fill events | Dev B, week 1 | The naive model, then the C++ engine | End of week 2 |
-| **Mock WebSocket server** — replays a recorded or synthetic message file at 20 Hz | Dev A, week 5 | The real fan-out process | End of week 5 |
-| **Sample Parquet files** — a few hundred hand-made bars in the agreed layout | Dev A, week 7 | The archiver's output | Start of week 7 |
+**The rebalance in D.3 reduced this from three stubs to one.** Because Dev B now owns the
+frontend *and* the fan-out, and the backtester *and* the archiver, those pairs are sequential
+work by the same person rather than a cross-developer wait. Only one stub is still load-bearing:
 
-The mock WebSocket server is the highest-value of the three. It removes the worst block in the
-plan, and it keeps paying afterwards: frontend work no longer needs the whole stack running, and
-edge cases like a slow feed or a sequence gap can be reproduced on demand rather than waited for.
+| Stub | Built by | Replaces | Swapped at | Still required? |
+|---|---|---|---|---|
+| **Stub engine** — accepts an order, returns canned fill events | Dev B, week 1 | The naive model, then the C++ engine | End of week 2 | **Yes** — Dev B's gateway and Dev A's naive model are built the same week by different people |
+| Mock WebSocket server | Dev B | The real fan-out | — | **No longer needed for blocking.** Dev B owns both sides. Still worth an hour as tooling: it lets a slow feed or a sequence gap be reproduced on demand rather than waited for |
+| Sample Parquet files | Dev B | The archiver's output | — | **No longer needed for blocking.** Dev B owns both. Useful only if the backtester is started before week 6 finishes |
+
+That the coordination machinery got *simpler* is a real benefit of concentrating the product
+track in one person, and it partly offsets the concentration risk noted in D.3.
 
 ### 3. Integration points
 
@@ -1614,41 +1626,81 @@ Short joint sessions, roughly two hours, where a stub is swapped for the real th
 
 | When | What is connected |
 |---|---|
-| End of week 2 | Gateway stops calling the stub engine and writes to the real stream; naive model consumes it |
-| End of week 5 | Frontend points at the real fan-out; the C++ engine process replaces the naive model |
-| Start of week 7 | Backtester reads real archived Parquet instead of samples |
+| End of week 2 | Gateway stops calling the stub engine and writes to the real stream; the naive model consumes it |
+| End of week 5 | The C++ engine process replaces the naive model as the stream's consumer |
+| End of week 7 | **[Joint]** the definition-of-done walk — Dev A's benchmark report against Dev B's deployed system |
 
 ## D.3 Week-by-week assignment
 
-Every cross-developer arrow points to a **previous** week. Hours are indicative.
+Rebalanced so that **Dev A carries less work, and everything Dev A does carry is engine,
+correctness, or performance.** Dev A owns no frontend and no infrastructure. Every
+cross-developer arrow still points to a previous week.
 
-| Wk | Dev A — exchange core | h | Dev B — platform | h |
+| Wk | Dev A — engine · correctness · performance | h | Dev B — platform · product | h |
 |---|---|---|---|---|
-| **1** | **[JOINT] 1.1 contracts** · 1.2 naive model · 2.3 scenarios | 18 | **[JOINT] 1.1 contracts** · 1.3 gateway on a stub engine · 1.4 docker stack | 29 |
-| **2** | 2.4 C++ engine — book and match loop | 24 | 2.1 Redis streams · 2.2 ledger | 30 |
-| **3** | 3.4 engine complete + nanobind · 3.3 deploy and CI | 25 | 3.1 risk and reservations · 3.2 idempotency | 27 |
-| **4** | 4.1 differential, property and determinism tests | 24 | 4.4 bots · 5.2 fan-out (starts) | 30 |
-| **5** | 4.2 engine process · 4.3 native benchmark · 5.4 frontend on mock WS | 26 | 5.2 fan-out (finishes) · 5.1 crypto prices and ten symbols | 26 |
-| **6** | 6.1 trading screen | 30 | 6.2 archiver · 6.3 load generator · 6.4 duplicates · 5.3 recovery script | 27 |
-| **7** | 7.1 backtester · 7.2 backtest screen · 7.3 integration tests | 25 | 7.4 benchmarks, trace tool, report · 7.5 hardening and definition of done | 27 |
-| | **Total** | **172** | **Total** | **196** |
+| **1** | **[JOINT] 1.1 contracts** · 1.2 naive model · 2.3 matching scenarios | 18 | **[JOINT] 1.1 contracts** · 1.3 gateway on a stub engine · 1.4 Docker stack · 5.4a frontend scaffold | 35 |
+| **2** | 2.4 C++ engine — order book and match loop | 18 | 2.1 Redis streams · 2.2 ledger · 5.4b auth screens | 35 |
+| **3** | 3.4 engine complete + nanobind adapter | 15 | 3.1 risk and reservations · 3.2 idempotency · 3.3 deploy and CI | 37 |
+| **4** | 4.1 differential, property and determinism tests | 24 | 4.4 bots · 5.2a fan-out begins · 5.4c WebSocket client and rAF loop | 35 |
+| **5** | 4.2 engine process · 4.3 native benchmark · 5.3 recovery script | 21 | 5.2b fan-out completes · 5.1 crypto prices, ten symbols · 6.1a trading screen begins | 36 |
+| **6** | 6.3 open-loop load generator · 6.4 duplicate injection | 14 | 6.1b trading screen completes · 6.2 archiver | 28 |
+| **7** | 7.4 benchmarks, trace tool, report · **[JOINT] 7.5 definition of done** | 24 | 7.1 backtester · 7.2 backtest screen · 7.3 integration tests · **[JOINT] 7.5** | 28 |
+| | **Total** | **134** | **Total** | **234** |
+
+### What Dev A now owns, end to end
+
+Every task on Dev A's list is something worth talking about in an interview:
+
+| Task | Why it matters |
+|---|---|
+| 1.2 · 2.3 naive model and scenarios | The executable specification the fast engine is measured against |
+| 2.4 · 3.4 the C++ engine | Single-writer, zero I/O, ~1000 lines. The headline artifact |
+| 4.1 differential and property tests | Two independent implementations agreeing across thousands of generated sequences — the strongest correctness claim in the project |
+| 4.2 engine as its own process | Replay-based recovery that is the same code path as normal operation |
+| 4.3 native benchmark | The throughput number, measured with no Python in the path |
+| 5.3 kill-the-engine recovery | The demonstration's strongest beat |
+| 6.3 · 6.4 open-loop load generator | Avoiding coordinated omission — the methodology that makes every other number defensible |
+| 7.4 benchmark report | The artifact repository readers actually read |
+
+**Nothing on that list is framework work, glue, or infrastructure.** It is an exchange core, a
+proof that it is correct, and a measurement of how fast it is.
 
 ### What moved, and why
 
 | Change | Reason |
 |---|---|
-| **1.1 becomes a joint task** | It is the contract between the two developers. Writing it together costs half a day and removes the week-1 block entirely |
-| **2.3 scenarios pulled into week 1** | Dev A has slack in week 1, and the scenarios verify the model — which must be right before anything is measured against it |
-| **3.3 deployment moves to Dev A** | Dev B is at capacity in week 3 with risk and idempotency; Dev A has room. Its dependencies (1.4, 2.2) are both from earlier weeks |
-| **5.2 fan-out moves to week 4** | Follows from the corrected dependency in D.1 — it needs the stream, not the C++ engine |
-| **5.4 frontend moves to week 5 on a mock server** | Removes the week-5 block, and flattens Dev A's peak, which previously put 54 hours into a single week |
-| **5.3 recovery script moves to Dev B, week 6** | Its dependencies (4.2, 4.4) are both complete by then, and Dev A is fully occupied with the trading screen |
+| **All frontend work → Dev B** (5.4, 6.1, 7.2) | 50 hours of React. It is real work and it must be done well, but it is not what a quantitative or systems interviewer asks about |
+| **Deployment and CI → Dev B** (3.3) | Infrastructure, and Dev B's domain anyway. It was only with Dev A for capacity reasons that no longer apply |
+| **Integration tests → Dev B** (7.3) | They exercise the gateway, auth and wiring — all Dev B's components |
+| **Backtester → Dev B** (7.1) | Consumes the archive, which Dev B builds. Its correctness argument is about lookahead prevention, not the engine |
+| **Load generator and duplicate injection → Dev A** (6.3, 6.4) | Moved *to* A: performance measurement now belongs to one person end to end, alongside the native benchmark and the report |
+| **Recovery script → Dev A** (5.3) | It proves Dev A's engine recovers correctly. Natural fit, and it is the demonstration's best moment |
+| **Benchmark report → Dev A** (7.4) | Completes the performance story as a single owned narrative |
+| **Definition-of-done walk → joint** (7.5) | It needs the benchmark report (Dev A) and the deployed system (Dev B). Making it joint removes the only remaining same-week cross-dependency |
+| **Frontend spread across weeks 1–6** | The mock WebSocket server means frontend work is unblocked from week 1. Spreading it keeps Dev B under 37 hours in every week instead of a 46-hour lump in weeks 5–6 |
 
-### Balance
+### Three consequences worth stating plainly
 
-Dev A carries 172 hours against Dev B's 196. The gap is deliberate: Dev A owns the C++ engine
-and the differential testing programme, which carry the steepest learning curve and the widest
-estimate uncertainty in the project.
+**1. Dev B now carries 64% of the work.** 234 hours against 134. Averaged over seven weeks that
+is roughly 33 hours a week for Dev B and 19 for Dev A.
+
+**2. Schedule risk concentrates almost entirely on Dev B.** If Dev B slips, the project slips,
+and Dev A cannot absorb it — the engine and testing track is specialised work that does not
+transfer mid-project. This is the real price of the rebalance and it should be a conscious
+trade, not a surprise in week 5.
+
+**3. Dev A has roughly 20 hours a week unspent.** That is only waste if it is treated as time
+off. The obvious use, in order of value:
+
+| Use of Dev A's slack | Why it is worth more than idle time |
+|---|---|
+| **Optimise the C++ engine** | The differential harness makes this *safe* — any optimisation that breaks correctness fails immediately against the naive model. "We made it 4× faster and proved it still behaves identically" is a better story than either half alone |
+| **Extend the property tests** | More invariants, more generated scenarios, a larger regression corpus |
+| **Take work off Dev B in weeks 3 and 5**, Dev B's two heaviest | Pair rather than parallel-own, so the no-blocking rule still holds |
+| **Write the engine's README section** | While the reasoning is fresh |
+
+If Dev A finishes the engine early and spends four weeks making it faster with proof it stayed
+correct, that is a **better** outcome than Dev A having been given more breadth.
 
 ## D.4 The rule to check against
 
