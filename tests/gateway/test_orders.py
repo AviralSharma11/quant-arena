@@ -196,3 +196,30 @@ def test_reserved_cash_does_not_leak_on_retry(logged_in: TestClient):
     response3 = logged_in.post("/orders", json=order3)
     assert response3.status_code == 409, "Should fail: 400k + 400k > 700k remaining"
     assert response3.json()["detail"]["reason"] == "INSUFFICIENT_CASH"
+
+
+def test_cancel_retry_returns_same_seq(logged_in: TestClient):
+    """Task 3.2 cancel idempotency. Retrying a cancel with the same client_order_id should
+    return the same seq from the first cancel."""
+    # Submit an order first
+    order = {**VALID, "client_order_id": 2010}
+    logged_in.post("/orders", json=order)
+    
+    # Cancel the order
+    cancel_req = {"client_order_id": 3010}
+    response1 = logged_in.request(
+        "DELETE", f"/orders/{VALID['client_order_id']}", json=cancel_req
+    )
+    assert response1.status_code == 202
+    body1 = response1.json()
+    seq1 = body1["seq"]
+    
+    # Retry the same cancel (same client_order_id)
+    response2 = logged_in.request(
+        "DELETE", f"/orders/{VALID['client_order_id']}", json=cancel_req
+    )
+    assert response2.status_code == 202
+    body2 = response2.json()
+    
+    # Should return the same seq (idempotent)
+    assert body2["seq"] == seq1

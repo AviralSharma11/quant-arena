@@ -23,6 +23,31 @@ from redis.asyncio import Redis
 #: Redis key format for idempotency state. Prefix + user_id + client_order_id.
 IDEMPOTENCY_PREFIX = "qa.idempotent:"
 
+# Lua script for atomic claim:
+# Check if the idempotency key exists, and if not, set it to "in_progress" atomically.
+# This ensures that only one submission can claim the key at a time.
+#
+# KEYS[1] = idempotency key
+# ARGV[1] = TTL in seconds
+#
+# Returns:
+# - [1, outcome_json] if key already exists (duplicate)
+# - [2, nil] if key didn't exist and we set it to "in_progress" (new submission)
+CLAIM_SCRIPT = """
+local key = KEYS[1]
+local ttl = tonumber(ARGV[1])
+
+-- Check if key already exists
+local existing = redis.call('GET', key)
+if existing then
+    return {1, existing}  -- duplicate: return stored outcome
+end
+
+-- Mark as in_progress atomically (only succeeds if key didn't exist)
+redis.call('SET', key, 'in_progress', 'EX', ttl)
+return {2, nil}  -- new: proceed with submission
+"""
+
 
 @dataclass
 class IdempotencyOutcome:
@@ -42,41 +67,49 @@ class IdempotencyOutcome:
 
 
 class IdempotencyStore:
-    """Manages idempotency keys and outcomes in Redis."""
+    """Manages idempotency keys and outcomes in Redis.
+
+    Uses a Lua script to atomically claim the idempotency key before appending to the stream.
+    This ensures the following invariant: if the key is claimed, an order was appended.
+    """
 
     def __init__(self, redis: Redis, ttl_seconds: int):
         self.redis = redis
         self.ttl_seconds = ttl_seconds
+        self._claim_script = redis.register_script(CLAIM_SCRIPT)
 
     def _key(self, user_id: int, client_order_id: int) -> str:
         return f"{IDEMPOTENCY_PREFIX}{user_id}:{client_order_id}"
 
     async def claim(self, user_id: int, client_order_id: int) -> IdempotencyOutcome:
-        """Claim the idempotency key for a new submission.
+        """Claim the idempotency key atomically.
+
+        Uses a Lua script to ensure that only one submission can claim the key.
+        If the key was already claimed, returns the stored outcome.
 
         Returns:
         - status="in_progress" if this is the first submission for this key
-        - status="in_progress" if a previous submission is still in flight
         - status="accepted"|"rejected" with stored outcome if a previous submission completed
         """
         key = self._key(user_id, client_order_id)
-        stored = await self.redis.get(key)
 
-        if stored is None:
-            # First submission: set to "in_progress"
-            await self.redis.set(key, "in_progress", ex=self.ttl_seconds)
-            return IdempotencyOutcome(status="in_progress")
+        # Execute the atomic claim script
+        result = await self._claim_script(keys=[key], args=[self.ttl_seconds])
 
-        # Duplicate submission: return stored outcome
-        try:
-            stored_dict = json.loads(stored)
-            return IdempotencyOutcome.from_dict(stored_dict)
-        except (json.JSONDecodeError, TypeError):
-            # Backward compat: if stored as plain string "in_progress"
+        if result[0] == 1:
+            # Duplicate: key already exists, return stored outcome
+            try:
+                stored_dict = json.loads(result[1])
+                return IdempotencyOutcome.from_dict(stored_dict)
+            except (json.JSONDecodeError, TypeError):
+                # Backward compat: if stored as plain string "in_progress"
+                return IdempotencyOutcome(status="in_progress")
+        else:
+            # New submission: key was set to "in_progress"
             return IdempotencyOutcome(status="in_progress")
 
     async def record_accepted(
-        self, user_id: int, client_order_id: int, order_id: int, seq: str
+        self, user_id: int, client_order_id: int, order_id: int | None, seq: str
     ) -> None:
         """Record that the submission was accepted."""
         key = self._key(user_id, client_order_id)

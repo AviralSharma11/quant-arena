@@ -243,13 +243,37 @@ async def get_portfolio(user_id: CurrentUser, db: DbSession) -> PortfolioRespons
 async def cancel_order(
     target_client_order_id: int,
     body: CancelOrderRequest,
+    request: Request,
     user_id: CurrentUser,
     streams: Streams,
     settings: Config,
+    idempotency: Idempotency,
 ) -> AcknowledgementResponse:
     if not 0 <= target_client_order_id <= U64_MAX:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "target_client_order_id out of range")
 
+    # Step 1: claim the idempotency key for the cancel
+    outcome = await idempotency.claim(user_id, body.client_order_id)
+
+    # If this is a duplicate cancel (not in_progress), return the stored outcome
+    if outcome.status == "accepted":
+        # Retry after acceptance: return the same seq
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    elif outcome.status == "rejected":
+        # Retry after rejection: return the same rejection
+        # (Note: cancels are no-ops so rejections are rare, but handle for uniformity)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    # else: status == "in_progress" - this is either first submission or currently in flight
+
+    # Step 2: append the cancel to the stream
     cancel = CancelOrder.new(
         timestamp_ns=time.time_ns(),
         client_order_id=body.client_order_id,
@@ -259,10 +283,24 @@ async def cancel_order(
     try:
         stream_id = await streams.append(settings.stream_inbound, cancel)
     except ExchangeHalted as halted:
+        # Record the failure
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
+    except Exception:
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INTERNAL_ERROR"
+        )
+        raise
+
+    # Step 3: record the acceptance
+    await idempotency.record_accepted(
+        user_id, body.client_order_id, None, stream_id
+    )
 
     # Accepted, not cancelled. Whether the order existed is the engine's answer, and it arrives
     # on the private stream — the gateway no longer knows and must not pretend to.
