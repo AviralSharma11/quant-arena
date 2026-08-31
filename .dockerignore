@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.hypothesis
+tests
+web
+engine
+open-issues
+*.md
+!services/gateway/README.md
+explorer.html
+docker-compose.yml
+Dockerfile
+.dockerignore

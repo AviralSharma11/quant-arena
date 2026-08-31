@@ -1,0 +1,46 @@
+# Quant Arena — the shared configuration.
+#
+# ONE file, version controlled, read by every process. Its SHA-256 is stamped into each
+# process's startup log, so a recorded session or a benchmark result is self-describing, and two
+# processes that disagree announce it immediately rather than producing quietly wrong output
+# (Open Issue 007 sub-decision 8d).
+#
+# What belongs here: domain parameters every process must agree on.
+# What does NOT belong here: where this process finds Redis or PostgreSQL, and secrets. Those
+# differ between a laptop, CI and production while the *configuration* is identical — putting
+# them here would make the hash change when nothing about the configuration had, which destroys
+# the only thing the hash is for. They come from the environment; see config/settings.py.
+#
+# Every value below is traceable to a decision in open-issues/. Do not add one that is not.
+
+[exchange]
+# Virtual capital granted to a new account, in int64 ticks. Decided 2026-08-31 during Task 1.3;
+# the plan and the 19 open issues never named a figure.
+initial_cash_ticks = 1_000_000
+
+[session]
+# Open Issue 015: Redis-backed session cookies, no JWT.
+ttl_seconds = 43200          # 12 hours
+cookie_name = "qa_session"
+cookie_samesite = "strict"
+
+[limits]
+# Open Issue 015 section 11.1: a single tier of 1000 orders/sec for all accounts, replacing the
+# two-tier proposal. Recorded there is the consequence — with one tier this is no longer
+# denial-of-service protection, it is exchange realism.
+max_orders_per_second = 1000
+
+[market_data]
+# Open Issue 006: 20 Hz conflation, complete L2 snapshots, ten levels per side.
+conflation_hz = 20
+book_depth = 10
+
+[replay]
+# Open Issue 005 sub-decision 5g: one real second maps to one simulated minute, so a demo shows
+# a trading day rather than a quiet minute. Configurable, and stamped into the stream from 2.1.
+real_seconds_per_simulated_minute = 1
+
+[symbols]
+# The ten symbols and their tick sizes are decided in Task 5.1, from replayed crypto history.
+# Deliberately empty until then rather than filled with invented values.
+listed = []
