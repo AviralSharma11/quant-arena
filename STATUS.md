@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `2948867` · **Week 2** (4–10 Sep) — started 3 days early
-**State:** **Task 2.2 complete** on branch `week-2-durable-event-flow`. 299 standalone tests pass (all suites green).
+**Last updated:** 2026-08-31 · **HEAD** `bd321b3` · **Week 2** (4–10 Sep) — started 3 days early
+**State:** **Week 2 Dev B work complete** on branch `week-2-durable-event-flow`. 302 standalone tests pass (all suites green).
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -11,21 +11,22 @@
 
 ## NOW
 
-**Task 5.4b · Auth screens** — Dev B, week 2
+**Task 3.1 · Risk checks and in-memory reservations** — Dev B, week 3
 
-- **Step:** build real login and registration screens in React, connecting to `/auth/register`
-  and `/auth/login`, verifying session persistence across page reload.
-- **Files:** `web/src/screens/Auth.tsx`, `web/src/App.tsx`, `tests/web/`.
-- **Done when:** login works and the session survives a page reload.
-  (`WEEKLY_PLAN.md` task 5.4b, Success Criterion.)
-- **Not in this step:** no email verification (Phase 2) · no third-party auth providers.
+- **Step:** maintain settled cash/positions and open reservations in gateway process memory,
+  check `available_cash >= order_cost` before stream append, release reservations on fill/cancel.
+- **Files:** `services/gateway/risk.py`, `services/gateway/routes_orders.py`, `tests/gateway/`.
+- **Done when:** order exceeding available cash is rejected with 409 INSUFFICIENT_CASH · partial
+  fills release difference · cancels release on confirmed event.
+  (`WEEKLY_PLAN.md` task 3.1, Success Criteria 1–4.)
+- **Not in this step:** no database round trip on hot path · reservations stay in process memory.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **3.1** Risk checks and in-memory reservations (Dev B, wk 3)
-2. **3.2** Idempotency — atomic claim-and-append (Dev B, wk 3)
+1. **3.2** Idempotency — atomic claim-and-append (Dev B, wk 3)
+2. **3.3** Public deployment and CI (Dev B, wk 3)
 
 ## Blocked / waiting
 
@@ -55,9 +56,9 @@ means something is wrong with the plan, not with the week.*
 | 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
 | 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
 | 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
-| 5.4b Auth screens | B | 2 | wip | — |
+| 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
-| 3.1  Risk checks + in-memory reservations | B | 3 | todo | — |
+| 3.1  Risk checks + in-memory reservations | B | 3 | wip | — |
 | 3.2  Idempotency — atomic claim-and-append | B | 3 | todo | **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | deployment target decided here |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |
@@ -111,7 +112,7 @@ Dev B's tasks with their Success Criteria as a live checklist. Deleted when the 
 - [x] No balance is ever written to PostgreSQL from any source other than the stream
 
 **5.4b Auth screens**
-- [ ] Login works and the session survives a page reload
+- [x] Login works and the session survives a page reload
 
 ---
 
