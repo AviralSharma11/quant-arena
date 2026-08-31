@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `8fd72bc` · **Week 2** (4–10 Sep) — started 3 days early
-**State:** **Task 2.1 complete** on branch `week-2-durable-event-flow`. 359 tests pass.
+**Last updated:** 2026-08-31 · **HEAD** `2948867` · **Week 2** (4–10 Sep) — started 3 days early
+**State:** **Task 2.2 complete** on branch `week-2-durable-event-flow`. 299 standalone tests pass (all suites green).
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -11,24 +11,21 @@
 
 ## NOW
 
-**Task 2.2 · Ledger writer and replay rebuild** — Dev B, week 2
+**Task 5.4b · Auth screens** — Dev B, week 2
 
-- **Step:** build consumer tailing `qa.outbound`, apply `Fill` to cash and positions with
-  maker/taker fee tracking into house account, apply `AccountCreated`/`CashCredited`, batch
-  writes to PostgreSQL, and full replay recovery on boot. Remember route-ordering trap for `/orders/open`.
-- **Files:** `services/ledger/`, `services/gateway/routes_orders.py`, `tests/ledger/`.
-- **Done when:** a fill moves counterparties' cash/positions · fees land in house account and
-  cash conservation invariant holds · restarting ledger reproduces byte-identical balances via replay ·
-  no balance is written to PostgreSQL except from the stream.
-  (`WEEKLY_PLAN.md` task 2.2, Success Criteria 1–4.)
-- **Not in this step:** no snapshots (rebuild by full replay) · no ORM on write path.
+- **Step:** build real login and registration screens in React, connecting to `/auth/register`
+  and `/auth/login`, verifying session persistence across page reload.
+- **Files:** `web/src/screens/Auth.tsx`, `web/src/App.tsx`, `tests/web/`.
+- **Done when:** login works and the session survives a page reload.
+  (`WEEKLY_PLAN.md` task 5.4b, Success Criterion.)
+- **Not in this step:** no email verification (Phase 2) · no third-party auth providers.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **5.4b** Auth screens (Dev B, wk 2)
-2. **3.1** Risk checks and in-memory reservations (Dev B, wk 3)
+1. **3.1** Risk checks and in-memory reservations (Dev B, wk 3)
+2. **3.2** Idempotency — atomic claim-and-append (Dev B, wk 3)
 
 ## Blocked / waiting
 
@@ -57,8 +54,8 @@ means something is wrong with the plan, not with the week.*
 | 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
 | 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
 | 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
-| 2.2  Ledger writer + replay rebuild | B | 2 | wip | — |
-| 5.4b Auth screens | B | 2 | todo | — |
+| 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
+| 5.4b Auth screens | B | 2 | wip | — |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
 | 3.1  Risk checks + in-memory reservations | B | 3 | todo | — |
 | 3.2  Idempotency — atomic claim-and-append | B | 3 | todo | **unblocks Dev A 6.4** |
@@ -107,11 +104,11 @@ Dev B's tasks with their Success Criteria as a live checklist. Deleted when the 
 - [x] Restarting Redis clears the halt state without a gateway restart
 
 **2.2 Ledger writer and replay rebuild**
-- [ ] A fill moves both counterparties' cash and positions correctly
-- [ ] Fees land in the house account; user cash + reservations + fee account is constant
+- [x] A fill moves both counterparties' cash and positions correctly
+- [x] Fees land in the house account; user cash + reservations + fee account is constant
       except at deposits
-- [ ] Killing the ledger and restarting reproduces byte-identical balances by replay
-- [ ] No balance is ever written to PostgreSQL from any source other than the stream
+- [x] Killing the ledger and restarting reproduces byte-identical balances by replay
+- [x] No balance is ever written to PostgreSQL from any source other than the stream
 
 **5.4b Auth screens**
 - [ ] Login works and the session survives a page reload
