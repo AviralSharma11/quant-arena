@@ -1,8 +1,8 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `34bbe91` · **Week 1** (28 Aug – 3 Sep)
-**State:** Contracts frozen and merged. Gateway and Docker stack on branch
-`task/1.3-gateway-skeleton`, pushed; PR not yet opened. `docker compose up` runs the system.
+**Last updated:** 2026-08-31 · **HEAD** `3df522c` · **Week 2** (4–10 Sep) — started 3 days early
+**State:** **Week 1 Dev B work complete**, all of it on branch `task/1.3-gateway-skeleton`,
+pushed; PR not yet opened. `docker compose up` runs the system. 331 tests pass.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -12,29 +12,38 @@
 
 ## NOW
 
-**Task 5.4a · Frontend scaffold — Vite + TypeScript + React** — Dev B, week 1
+**Task 2.1 · Redis Streams event flow, durability, and halt state** — Dev B, week 2
 
-- **Step:** scaffold the frontend under `web/` and put routing in place for the three screens.
-  Nothing is wired to the gateway yet — 5.4b (week 2) adds auth screens, 5.4c (week 4) the
-  WebSocket client.
-- **Files:** `web/` — does not exist yet.
-- **Done when:** Vite + TypeScript + React builds and serves · routing is in place for the
-  three planned screens. (`WEEKLY_PLAN.md` task 5.4, Success Criteria for 5.4a.)
-- **Not in this step:** no auth screens (5.4b) · no WebSocket client, gap detection or rAF loop
-  (5.4c) · no charts · **three screens only** — Open Issue 014 §11.1 closed that list.
-- **The high-frequency buffer decision is not needed yet** (Open Issue 014): it lands in 5.4c.
+- **Step:** replace the in-process stub call with a durable Redis stream. Stream client module,
+  a measured `appendfsync` decision, batched `XREAD`, and a visible halt state when Redis is
+  gone. **The Redis stream ID *is* the sequence number** — never a parallel counter (OI 003).
+- **Files:** `services/gateway/` (the `engine_port` call site), plus a new stream module.
+  `contracts.with_seq()` already exists for stamping records on read.
+- **Done when:** an order is `XADD`ed and read back with a monotonic stream ID · sustained
+  `XADD` throughput measured and recorded with the `appendfsync` choice and reasoning ·
+  `XREAD COUNT n` returns genuine batches, per-record cost recorded at n = 1, 10, 100 ·
+  stopping Redis puts the gateway in a visible halt state rejecting orders with a reason ·
+  restarting Redis clears the halt without a gateway restart.
+  (`WEEKLY_PLAN.md` task 2.1, Success Criteria 1–5.)
+- **Not in this step:** no memory-mapped log (Phase 3) · no Kafka · **no snapshots or
+  checkpointing** · no separate sequencer — the single gateway is the single producer.
+- **This is the first thing Dev A is waiting on** — 2.1 unblocks A's 4.2. It must not slip.
+- **Started early (31 Aug).** Appendix D.5 permits it: 2.1 depends only on 1.1 and 1.3, both
+  done, so there is no unmet cross-developer dependency.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **2.1** Redis Streams, durability, halt state (Dev B, wk 2) — **unblocks Dev A 4.2**
-2. **2.2** Ledger writer and replay rebuild (Dev B, wk 2)
-3. **5.4b** Auth screens (Dev B, wk 2)
+1. **2.2** Ledger writer and replay rebuild (Dev B, wk 2)
+2. **5.4b** Auth screens (Dev B, wk 2)
+3. **3.1** Risk checks and in-memory reservations (Dev B, wk 3)
 
 ## Blocked / waiting
 
 - **On Dev A:** nothing.
+  *(End of week 2 is the first integration point: the stub engine is swapped for the real
+  stream and Dev A's naive model consumes it. Appendix D.2.)*
 - **On a decision from me:** nothing.
 - **On something external:** nothing.
 
@@ -54,9 +63,9 @@ means something is wrong with the plan, not with the week.*
 | 2.3  Hand-written matching scenarios (T1) | A | 1 | A:unknown | not yet reported |
 | 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
 | 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
-| 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | wip | — |
+| 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
 | 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
-| 2.1  Redis Streams, durability, halt state | B | 2 | todo | **unblocks Dev A 4.2** |
+| 2.1  Redis Streams, durability, halt state | B | 2 | wip | **unblocks Dev A 4.2** |
 | 2.2  Ledger writer + replay rebuild | B | 2 | todo | — |
 | 5.4b Auth screens | B | 2 | todo | — |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
@@ -94,41 +103,27 @@ means something is wrong with the plan, not with the week.*
 
 ---
 
-## This week — week 1 (28 Aug – 3 Sep)
+## This week — week 2 (4–10 Sep)
 
 Dev B's tasks with their Success Criteria as a live checklist. Deleted when the week closes.
 
-**1.1 Contracts** *(joint)*
-- [x] One definition file generates both outputs — `test_generated_is_current.py`
-- [x] Round-trips with every field identical — `test_roundtrip.py`, Hypothesis, 11 records
-- [x] C++ `sizeof` == Python `struct.calcsize` — `test_sizes.py`, compiles and runs the header;
-      field offsets compared too, so layouts are identical and not merely the same length
-- [x] Every record carries `schema_version` — `test_conventions.py`
-- [x] No float, string or variable-width field — `test_conventions.py`
+**2.1 Redis Streams, durability, halt state** — *unblocks Dev A 4.2, must not slip*
+- [ ] An order is `XADD`ed and read back with a monotonically increasing stream ID
+- [ ] Sustained `XADD` throughput measured and recorded, with the `appendfsync` setting and the
+      reasoning beside it
+- [ ] `XREAD COUNT n` returns genuine batches under load; per-record cost recorded at 1, 10, 100
+- [ ] Stopping Redis produces a visible halt state that rejects orders with a reason
+- [ ] Restarting Redis clears the halt state without a gateway restart
 
-**1.3 Gateway skeleton**
-- [x] Registers, logs in, receives virtual capital — `test_auth.py`; the grant is asserted in
-      the `accounts` table, not just in the response
-- [x] Session survives a restart — `test_restart.py`, a real uvicorn subprocess killed and
-      restarted. The two-`create_app()` version of this test was proven insufficient by
-      mutation: a class-level dict passed it
-- [x] `POST /orders` → `202` + order id, malformed → `400` — `test_orders.py`, 15 bad shapes
-- [x] Argon2id only — `test_auth.py`, including a sweep of every text column for the plaintext
+**2.2 Ledger writer and replay rebuild**
+- [ ] A fill moves both counterparties' cash and positions correctly
+- [ ] Fees land in the house account; user cash + reservations + fee account is constant
+      except at deposits
+- [ ] Killing the ledger and restarting reproduces byte-identical balances by replay
+- [ ] No balance is ever written to PostgreSQL from any source other than the stream
 
-**1.4 Docker stack**
-- [x] Clean from a fresh checkout — literally: `git clone` to a temp directory with no venv and
-      the hand-made containers removed, then cold. All three healthy in 34s
-- [x] Gateway reaches Redis and PostgreSQL — `/health` answers, compose reports all three
-      `(healthy)`; `depends_on` uses `service_healthy`, not `service_started`
-- [x] Config hash in the startup log — the hash in the container's log matches
-      `shasum -a 256 config/quant_arena.toml` exactly. `tests/config/test_settings.py`
-- [x] README section — `README.md` "Running it". Also re-verified end to end through the
-      containers: register → login → `202`, malformed → `400`, no session → `401`, and the
-      session survived `docker compose restart gateway`
-
-**5.4a Frontend scaffold**
-- [ ] Vite + TypeScript + React builds and serves
-- [ ] Routing in place for the three planned screens
+**5.4b Auth screens**
+- [ ] Login works and the session survives a page reload
 
 ---
 
@@ -152,6 +147,9 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-08-31 | **Configuration and infrastructure are split.** Domain parameters live in `config/quant_arena.toml` and nowhere else — no env override, no code default, a missing value raises. Connection URLs, secrets and cookie `Secure` come from the environment and are **not** hashed | 1.4's boundary ("one file is the point") cannot be absolute: the gateway reaches PostgreSQL at `postgres` in Docker and `localhost` on a laptop, and a password must not be version controlled. More importantly, a connection URL inside the hash would change it when the *configuration* had not — destroying the one question the hash answers | interprets 1.4's boundary; OI 007 §8d |
 | 2026-08-31 | `[symbols]` left empty in the config file | The ten symbols and tick sizes are Task 5.1's to decide from replayed crypto history. An invented list would look settled without being so | — |
 | 2026-08-31 | Config hash goes to the **log** in 1.4, and to the stream in 2.1 | OI 007 §8d wants it stamped into the event stream; there is no stream until 2.1 | stages OI 007 §8d |
+| 2026-08-31 | `react-router-dom` added to the closed stack list | React ships no router and the three screens need one; the ~40-line hand-rolled alternative was weighed and rejected because 5.4b also needs a protected-route wrapper | **amends `CLAUDE.md` and OI 019** — applied in `3df522c` |
+| 2026-08-31 | No JavaScript test framework | Node 24 strips TypeScript natively, so the route table is inspected and the built app served from the existing pytest suite. Keeps the closed list one dependency wider, not three | — |
+| 2026-08-31 | Frontend stays out of `docker-compose.yml` | 1.4 is closed and deployment is 3.3's. The Vite dev server runs on the host against the containerised gateway | — |
 
 ## Deviations from the plan
 
@@ -174,7 +172,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest -q               # 321 tests, against the compose stores
+.venv/bin/python -m pytest -q               # 331 tests, against the compose stores
+
+cd web && npm install && npm run dev        # frontend at localhost:5173, proxied to the gateway
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one — a green run carrying
 that skip has not verified 1.1's Success Criterion 3.
@@ -186,3 +186,7 @@ that skip has not verified 1.1's Success Criterion 3.
 ## Archive
 
 *(one line per closed week — everything else from that week is deleted; git history is the record)*
+
+- **Week 1 (28 Aug – 3 Sep) — closed 31 Aug, 3 days early.** 1.1 contracts frozen and merged ·
+  1.3 gateway skeleton · 1.4 Docker stack and shared config · 5.4a frontend scaffold. All Dev B
+  and joint criteria passed with named tests; 331 tests green. Dev A's 1.2 and 2.3 not reported.
