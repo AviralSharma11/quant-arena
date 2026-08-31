@@ -8,6 +8,7 @@ in test_halt.py, which stops the real Redis container.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
 
 import pytest
 import redis.asyncio as redis_async
@@ -137,13 +138,74 @@ async def test_batching_preserves_order(redis, producer):
 
 
 async def test_a_batch_never_exceeds_batch_max(redis, settings):
+    """Asserts the actual bound, not a lower bound on the number of flushes — the earlier
+    version of this test would have passed with no limit enforced at all."""
     p = StreamProducer(redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=8)
     p.start()
     try:
         await asyncio.gather(*(p.append(STREAM, _order(i)) for i in range(64)))
-        assert p.batches_flushed >= 64 // 8
+        assert p.max_batch <= 8, f"a batch of {p.max_batch} exceeded batch_max of 8"
+        assert p.max_batch > 1, "no batching happened at all"
     finally:
         await p.stop()
+
+
+# --- the producer must fail, never hang ------------------------------------------------------
+#
+# A hung request is the worst failure available here: the gateway stays up, /health answers
+# "ok", and orders simply never return. Each of these was a real hang before the fix.
+
+
+async def test_an_unexpected_error_fails_the_append_and_the_loop_survives(redis, settings):
+    """Only RedisError and connection failures were handled. Anything else killed the flusher,
+    and every later append then awaited a future nobody would ever resolve."""
+
+    class Boom(Exception):
+        pass
+
+    p = StreamProducer(redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=8)
+    p.start()
+    try:
+        with patch.object(type(redis), "pipeline", side_effect=Boom("unexpected")):
+            with pytest.raises(Boom):
+                await asyncio.wait_for(p.append(STREAM, _order(1)), timeout=5.0)
+
+        assert p.running, "one bad flush killed the producer loop"
+        # And it genuinely recovers, rather than merely staying alive.
+        assert await asyncio.wait_for(p.append(STREAM, _order(2)), timeout=5.0)
+    finally:
+        await p.stop()
+
+
+async def test_appending_to_a_dead_producer_halts_rather_than_hanging(redis, settings):
+    halt = HaltState()
+    p = StreamProducer(redis, halt, maxlen=settings.stream_maxlen, batch_max=8)
+    p.start()
+    p._task.cancel()
+    await asyncio.sleep(0.05)
+
+    with pytest.raises(ExchangeHalted) as raised:
+        await asyncio.wait_for(p.append(STREAM, _order(1)), timeout=5.0)
+    assert raised.value.reason == HaltReason.PRODUCER_STOPPED
+    assert halt.halted, "a producer that cannot append must halt the exchange"
+
+
+async def test_stopping_the_producer_answers_everything_still_queued(redis, settings):
+    """Shutdown must not strand a request either."""
+    halt = HaltState()
+    p = StreamProducer(redis, halt, maxlen=settings.stream_maxlen, batch_max=1)
+    p.start()
+    pending = [asyncio.create_task(p.append(STREAM, _order(i))) for i in range(20)]
+    await asyncio.sleep(0)
+    await p.stop()
+
+    results = await asyncio.wait_for(
+        asyncio.gather(*pending, return_exceptions=True), timeout=5.0
+    )
+    for result in results:
+        assert isinstance(result, (str, ExchangeHalted)), (
+            f"an append was left unresolved on shutdown: {result!r}"
+        )
 
 
 # --- criterion 3: XREAD COUNT n returns genuine batches -------------------------------------

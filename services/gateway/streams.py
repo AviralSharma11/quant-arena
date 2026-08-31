@@ -41,6 +41,9 @@ UNREACHABLE = (RedisConnectionError, RedisTimeoutError, OSError)
 
 class HaltReason:
     REDIS_UNREACHABLE = "redis_unreachable"
+    #: The producer loop is not running, so nothing can be appended. Distinct from Redis being
+    #: unreachable: the store may be perfectly healthy and the gateway still unable to record.
+    PRODUCER_STOPPED = "producer_stopped"
 
 
 @dataclass
@@ -116,6 +119,7 @@ class StreamProducer:
         self._task: asyncio.Task | None = None
         self.batches_flushed = 0
         self.records_written = 0
+        self.max_batch = 0
 
     def start(self) -> None:
         if self._task is None:
@@ -129,16 +133,52 @@ class StreamProducer:
             except asyncio.CancelledError:
                 pass
             self._task = None
+        self._drain_and_fail(ExchangeHalted(HaltReason.PRODUCER_STOPPED))
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
 
     async def append(self, stream: str, record) -> str:
         """Append one record; returns the Redis stream ID, which *is* its sequence number."""
         if self._halt.halted:
             raise ExchangeHalted(self._halt.reason or HaltReason.REDIS_UNREACHABLE)
+        if not self.running:
+            # Without this the caller would await a future nobody will ever resolve. A hung
+            # request is worse than a failed one: the gateway looks alive and answers /health,
+            # while every order silently never returns.
+            self._halt.halt(HaltReason.PRODUCER_STOPPED, "stream producer is not running")
+            raise ExchangeHalted(HaltReason.PRODUCER_STOPPED)
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         await self._queue.put(_Pending(stream, record.pack(), future))
         return await future
 
+    @staticmethod
+    def _fail(batch: list[_Pending], exc: BaseException) -> None:
+        for item in batch:
+            if not item.future.done():
+                item.future.set_exception(exc)
+
+    def _drain_and_fail(self, exc: BaseException) -> None:
+        """Nothing may be left awaiting a future that will never be resolved."""
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            if not item.future.done():
+                item.future.set_exception(exc)
+
     async def _run(self) -> None:
+        try:
+            await self._loop()
+        finally:
+            # However this loop ends — cancellation, or a bug nobody predicted — every queued
+            # append is answered. See `append` for why a hang is the worse failure.
+            self._halt.halt(HaltReason.PRODUCER_STOPPED, "stream producer stopped")
+            self._drain_and_fail(ExchangeHalted(HaltReason.PRODUCER_STOPPED))
+
+    async def _loop(self) -> None:
         while True:
             first = await self._queue.get()
             batch = [first]
@@ -150,7 +190,13 @@ class StreamProducer:
                     batch.append(self._queue.get_nowait())
                 except asyncio.QueueEmpty:
                     break
-            await self._flush(batch)
+            try:
+                await self._flush(batch)
+            except asyncio.CancelledError:
+                self._fail(batch, ExchangeHalted(HaltReason.PRODUCER_STOPPED))
+                raise
+            except BaseException as exc:  # noqa: BLE001 — a flush must never kill the loop
+                self._fail(batch, exc)
 
     async def _flush(self, batch: list[_Pending]) -> None:
         try:
@@ -170,18 +216,23 @@ class StreamProducer:
                     item.future.set_exception(ExchangeHalted(HaltReason.REDIS_UNREACHABLE))
             return
         except RedisError as exc:  # a real command error — not a halt
-            for item in batch:
-                if not item.future.done():
-                    item.future.set_exception(exc)
+            self._fail(batch, exc)
             return
 
         self.batches_flushed += 1
         self.records_written += len(batch)
+        self.max_batch = max(self.max_batch, len(batch))
         for item, stream_id in zip(batch, ids):
             if not item.future.done():
                 item.future.set_result(
                     stream_id.decode() if isinstance(stream_id, bytes) else stream_id
                 )
+        # Defensive: a short reply must not leave anyone waiting forever.
+        if len(ids) < len(batch):
+            self._fail(
+                batch[len(ids):],
+                RedisError(f"pipeline returned {len(ids)} ids for {len(batch)} appends"),
+            )
 
 
 class ExchangeHalted(Exception):
