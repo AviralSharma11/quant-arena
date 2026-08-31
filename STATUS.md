@@ -1,8 +1,8 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `4c09dfa` · **Week 1** (28 Aug – 3 Sep)
-**State:** Contracts v1 frozen and merged. Gateway skeleton on branch
-`task/1.3-gateway-skeleton`, pushed; PR not yet opened.
+**Last updated:** 2026-08-31 · **HEAD** `34bbe91` · **Week 1** (28 Aug – 3 Sep)
+**State:** Contracts frozen and merged. Gateway and Docker stack on branch
+`task/1.3-gateway-skeleton`, pushed; PR not yet opened. `docker compose up` runs the system.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -12,25 +12,25 @@
 
 ## NOW
 
-**Task 1.4 · Local Docker stack and shared configuration** — Dev B, week 1
+**Task 5.4a · Frontend scaffold — Vite + TypeScript + React** — Dev B, week 1
 
-- **Step:** write `docker-compose.yml` covering Redis, PostgreSQL and the gateway, plus the
-  shared config whose content hash every process logs at startup. The ad-hoc `docker run`
-  commands in `services/gateway/README.md` are what this replaces.
-- **Files:** `docker-compose.yml`, `Dockerfile`, `config/` — compose files do not exist yet.
-- **Done when:** `docker compose up` comes up clean from a fresh checkout · the gateway reaches
-  Redis and PostgreSQL and health checks pass · the config content hash appears in every
-  process's startup log · a README section documents the run procedure.
-  (`WEEKLY_PLAN.md` task 1.4, Success Criteria 1–4.)
-- **Not in this step:** no CI (3.3) · no deployment target (3.3) · no engine container yet.
+- **Step:** scaffold the frontend under `web/` and put routing in place for the three screens.
+  Nothing is wired to the gateway yet — 5.4b (week 2) adds auth screens, 5.4c (week 4) the
+  WebSocket client.
+- **Files:** `web/` — does not exist yet.
+- **Done when:** Vite + TypeScript + React builds and serves · routing is in place for the
+  three planned screens. (`WEEKLY_PLAN.md` task 5.4, Success Criteria for 5.4a.)
+- **Not in this step:** no auth screens (5.4b) · no WebSocket client, gap detection or rAF loop
+  (5.4c) · no charts · **three screens only** — Open Issue 014 §11.1 closed that list.
+- **The high-frequency buffer decision is not needed yet** (Open Issue 014): it lands in 5.4c.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **5.4a** Frontend scaffold — Vite + TypeScript + React (Dev B, wk 1)
-2. **2.1** Redis Streams, durability, halt state (Dev B, wk 2) — **unblocks Dev A 4.2**
-3. **2.2** Ledger writer and replay rebuild (Dev B, wk 2)
+1. **2.1** Redis Streams, durability, halt state (Dev B, wk 2) — **unblocks Dev A 4.2**
+2. **2.2** Ledger writer and replay rebuild (Dev B, wk 2)
+3. **5.4b** Auth screens (Dev B, wk 2)
 
 ## Blocked / waiting
 
@@ -53,8 +53,8 @@ means something is wrong with the plan, not with the week.*
 | 1.2  Naive Python model engine | A | 1 | A:unknown | not yet reported |
 | 2.3  Hand-written matching scenarios (T1) | A | 1 | A:unknown | not yet reported |
 | 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
-| 1.4  Local Docker stack + shared config | B | 1 | wip | — |
-| 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | todo | — |
+| 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
+| 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | wip | — |
 | 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
 | 2.1  Redis Streams, durability, halt state | B | 2 | todo | **unblocks Dev A 4.2** |
 | 2.2  Ledger writer + replay rebuild | B | 2 | todo | — |
@@ -116,10 +116,15 @@ Dev B's tasks with their Success Criteria as a live checklist. Deleted when the 
 - [x] Argon2id only — `test_auth.py`, including a sweep of every text column for the plaintext
 
 **1.4 Docker stack**
-- [ ] `docker compose up` comes up clean from a fresh checkout
-- [ ] The gateway reaches Redis and PostgreSQL; health checks pass
-- [ ] The config content hash appears in every process's startup log
-- [ ] A README section documents the run procedure
+- [x] Clean from a fresh checkout — literally: `git clone` to a temp directory with no venv and
+      the hand-made containers removed, then cold. All three healthy in 34s
+- [x] Gateway reaches Redis and PostgreSQL — `/health` answers, compose reports all three
+      `(healthy)`; `depends_on` uses `service_healthy`, not `service_started`
+- [x] Config hash in the startup log — the hash in the container's log matches
+      `shasum -a 256 config/quant_arena.toml` exactly. `tests/config/test_settings.py`
+- [x] README section — `README.md` "Running it". Also re-verified end to end through the
+      containers: register → login → `202`, malformed → `400`, no session → `401`, and the
+      session survived `docker compose restart gateway`
 
 **5.4a Frontend scaffold**
 - [ ] Vite + TypeScript + React builds and serves
@@ -144,6 +149,9 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-08-31 | `INITIAL_CASH_TICKS` in `config/settings.py`, default 1,000,000 ticks | The grant amount is specified nowhere in the plan or the 19 open issues; 4.4's bots will need their own figure and this is where it goes | — |
 | 2026-08-31 | Gateway maps `RequestValidationError` to `400` | FastAPI's default is `422`; OI 008 §9h and 1.3 criterion 3 both require `400`. Without the handler the criterion fails silently | — |
 | 2026-08-31 | Money and timestamp columns declared `BIGINT` explicitly | A bare SQLModel `int` is a 32-bit `INTEGER` and holds neither an int64 tick amount nor a nanosecond timestamp | — |
+| 2026-08-31 | **Configuration and infrastructure are split.** Domain parameters live in `config/quant_arena.toml` and nowhere else — no env override, no code default, a missing value raises. Connection URLs, secrets and cookie `Secure` come from the environment and are **not** hashed | 1.4's boundary ("one file is the point") cannot be absolute: the gateway reaches PostgreSQL at `postgres` in Docker and `localhost` on a laptop, and a password must not be version controlled. More importantly, a connection URL inside the hash would change it when the *configuration* had not — destroying the one question the hash answers | interprets 1.4's boundary; OI 007 §8d |
+| 2026-08-31 | `[symbols]` left empty in the config file | The ten symbols and tick sizes are Task 5.1's to decide from replayed crypto history. An invented list would look settled without being so | — |
+| 2026-08-31 | Config hash goes to the **log** in 1.4, and to the stream in 2.1 | OI 007 §8d wants it stamped into the event stream; there is no stream until 2.1 | stages OI 007 §8d |
 
 ## Deviations from the plan
 
@@ -157,15 +165,19 @@ decisions: a schedule deviation is not a design change.
 ## How to run it right now
 
 ```bash
+docker compose up --build        # the whole system. Docs at localhost:8000/docs
+docker compose logs gateway | grep config_hash
+
+# developing, with reloads:
+docker compose up -d redis postgres
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first time only
-docker start quant-arena-redis quant-arena-postgres    # see services/gateway/README.md
-.venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000   # docs at /docs
+.venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest contracts/v1/tests tests/gateway -q    # 285 tests
+.venv/bin/python -m pytest -q               # 321 tests, against the compose stores
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one — a green run carrying
-that skip has not verified Success Criterion 3. Superseded by the Docker stack in 1.4.
+that skip has not verified 1.1's Success Criterion 3.
 
 ## Open questions
 
