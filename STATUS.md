@@ -1,8 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `3df522c` · **Week 2** (4–10 Sep) — started 3 days early
-**State:** **Week 1 Dev B work complete**, all of it on branch `task/1.3-gateway-skeleton`,
-pushed; PR not yet opened. `docker compose up` runs the system. 331 tests pass.
+**Last updated:** 2026-08-31 · **HEAD** `8fd72bc` · **Week 2** (4–10 Sep) — started 3 days early
+**State:** **Task 2.1 complete** on branch `week-2-durable-event-flow`. 359 tests pass.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -12,32 +11,24 @@ pushed; PR not yet opened. `docker compose up` runs the system. 331 tests pass.
 
 ## NOW
 
-**Task 2.1 · Redis Streams event flow, durability, and halt state** — Dev B, week 2
+**Task 2.2 · Ledger writer and replay rebuild** — Dev B, week 2
 
-- **Step:** replace the in-process stub call with a durable Redis stream. Stream client module,
-  a measured `appendfsync` decision, batched `XREAD`, and a visible halt state when Redis is
-  gone. **The Redis stream ID *is* the sequence number** — never a parallel counter (OI 003).
-- **Files:** `services/gateway/` (the `engine_port` call site), plus a new stream module.
-  `contracts.with_seq()` already exists for stamping records on read.
-- **Done when:** an order is `XADD`ed and read back with a monotonic stream ID · sustained
-  `XADD` throughput measured and recorded with the `appendfsync` choice and reasoning ·
-  `XREAD COUNT n` returns genuine batches, per-record cost recorded at n = 1, 10, 100 ·
-  stopping Redis puts the gateway in a visible halt state rejecting orders with a reason ·
-  restarting Redis clears the halt without a gateway restart.
-  (`WEEKLY_PLAN.md` task 2.1, Success Criteria 1–5.)
-- **Not in this step:** no memory-mapped log (Phase 3) · no Kafka · **no snapshots or
-  checkpointing** · no separate sequencer — the single gateway is the single producer.
-- **This is the first thing Dev A is waiting on** — 2.1 unblocks A's 4.2. It must not slip.
-- **Started early (31 Aug).** Appendix D.5 permits it: 2.1 depends only on 1.1 and 1.3, both
-  done, so there is no unmet cross-developer dependency.
+- **Step:** build consumer tailing `qa.outbound`, apply `Fill` to cash and positions with
+  maker/taker fee tracking into house account, apply `AccountCreated`/`CashCredited`, batch
+  writes to PostgreSQL, and full replay recovery on boot. Remember route-ordering trap for `/orders/open`.
+- **Files:** `services/ledger/`, `services/gateway/routes_orders.py`, `tests/ledger/`.
+- **Done when:** a fill moves counterparties' cash/positions · fees land in house account and
+  cash conservation invariant holds · restarting ledger reproduces byte-identical balances via replay ·
+  no balance is written to PostgreSQL except from the stream.
+  (`WEEKLY_PLAN.md` task 2.2, Success Criteria 1–4.)
+- **Not in this step:** no snapshots (rebuild by full replay) · no ORM on write path.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **2.2** Ledger writer and replay rebuild (Dev B, wk 2)
-2. **5.4b** Auth screens (Dev B, wk 2)
-3. **3.1** Risk checks and in-memory reservations (Dev B, wk 3)
+1. **5.4b** Auth screens (Dev B, wk 2)
+2. **3.1** Risk checks and in-memory reservations (Dev B, wk 3)
 
 ## Blocked / waiting
 
@@ -65,8 +56,8 @@ means something is wrong with the plan, not with the week.*
 | 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
 | 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
 | 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
-| 2.1  Redis Streams, durability, halt state | B | 2 | wip | **unblocks Dev A 4.2** |
-| 2.2  Ledger writer + replay rebuild | B | 2 | todo | — |
+| 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
+| 2.2  Ledger writer + replay rebuild | B | 2 | wip | — |
 | 5.4b Auth screens | B | 2 | todo | — |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
 | 3.1  Risk checks + in-memory reservations | B | 3 | todo | — |
@@ -108,12 +99,12 @@ means something is wrong with the plan, not with the week.*
 Dev B's tasks with their Success Criteria as a live checklist. Deleted when the week closes.
 
 **2.1 Redis Streams, durability, halt state** — *unblocks Dev A 4.2, must not slip*
-- [ ] An order is `XADD`ed and read back with a monotonically increasing stream ID
-- [ ] Sustained `XADD` throughput measured and recorded, with the `appendfsync` setting and the
+- [x] An order is `XADD`ed and read back with a monotonically increasing stream ID
+- [x] Sustained `XADD` throughput measured and recorded, with the `appendfsync` setting and the
       reasoning beside it
-- [ ] `XREAD COUNT n` returns genuine batches under load; per-record cost recorded at 1, 10, 100
-- [ ] Stopping Redis produces a visible halt state that rejects orders with a reason
-- [ ] Restarting Redis clears the halt state without a gateway restart
+- [x] `XREAD COUNT n` returns genuine batches under load; per-record cost recorded at 1, 10, 100
+- [x] Stopping Redis produces a visible halt state that rejects orders with a reason
+- [x] Restarting Redis clears the halt state without a gateway restart
 
 **2.2 Ledger writer and replay rebuild**
 - [ ] A fill moves both counterparties' cash and positions correctly
