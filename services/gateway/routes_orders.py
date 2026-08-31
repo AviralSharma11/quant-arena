@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from config.settings import Settings
 from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
-from services.gateway.deps import Config, CurrentUser, DbSession, Streams
+from services.gateway.deps import Config, CurrentUser, DbSession, Idempotency, Streams
 from services.gateway.streams import ExchangeHalted
 
 router = APIRouter(tags=["orders"])
@@ -97,15 +97,42 @@ async def submit_order(
     user_id: CurrentUser,
     streams: Streams,
     settings: Config,
+    idempotency: Idempotency,
 ) -> AcknowledgementResponse:
+    # Step 1: claim the idempotency key
+    outcome = await idempotency.claim(user_id, body.client_order_id)
+
+    # If this is a duplicate (not in_progress), return the stored outcome
+    if outcome.status == "accepted":
+        # Retry after acceptance: return the same order_id and seq
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=outcome.order_id,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    elif outcome.status == "rejected":
+        # Retry after rejection: return the same rejection
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    # else: status == "in_progress" - this is either first submission or currently in flight
+
+    # Step 2: validate available cash
     risk = request.app.state.risk
     order_cost = body.price_ticks * body.qty
     if risk.available_cash(user_id) < order_cost:
+        # Reject and record the rejection
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INSUFFICIENT_CASH"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
         )
 
+    # Step 3: reserve the cash
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
         client_order_id=body.client_order_id,
@@ -124,19 +151,33 @@ async def submit_order(
         price_ticks=body.price_ticks,
         qty=body.qty,
     )
+
+    # Step 4: append to stream (claim and append are atomic via the idempotency key)
     try:
         stream_id = await streams.append(settings.stream_inbound, order)
     except ExchangeHalted as halted:
         # The exchange cannot durably record this. Fail loudly rather than time out silently,
         # or worse, accept an order that was never written (Open Issue 003 §8.5).
         risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
     except Exception:
         risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INTERNAL_ERROR"
+        )
         raise
+
+    # Step 5: record the acceptance
+    # Note: order_id is None because the engine assigns it; we store None (not 0)
+    await idempotency.record_accepted(
+        user_id, body.client_order_id, None, stream_id
+    )
 
     return AcknowledgementResponse(
         client_order_id=order.client_order_id,

@@ -26,6 +26,7 @@ from config.startup import log_startup
 from services.engine_stub import StubEngine
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
 from services.gateway.engine_port import EnginePort
+from services.gateway.idempotency import IdempotencyStore
 from services.gateway.risk import RiskState
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
@@ -60,6 +61,7 @@ def create_app(
         app.state.startup_record = log_startup("gateway", settings)
         app.state.redis = redis
         app.state.sessions = SessionStore(redis, settings.session_ttl_seconds)
+        app.state.idempotency = IdempotencyStore(redis, settings.idempotency_ttl_seconds)
         app.state.db_sessionmaker = async_sessionmaker(
             db, class_=AsyncSession, expire_on_commit=False
         )
