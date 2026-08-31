@@ -39,7 +39,38 @@ only infrastructure. See the root `README.md` for the full run procedure.
 | `deps.py` | Request-scoped dependencies, `current_user_id` |
 | `routes_auth.py` | register · login · logout |
 | `routes_orders.py` | `POST /orders` · `DELETE /orders/{client_order_id}` |
-| `engine_port.py` | **The seam.** Swapped end of week 2, then end of week 5 |
+| `streams.py` | **The durable log.** Batching producer, consumer helper, halt state |
+| `engine_port.py` | The week-1 seam. No longer on the order path — see below |
+
+## The stream (Task 2.1)
+
+The gateway is the single **producer**. `POST /orders` `XADD`s to `qa.inbound` and returns the
+stream ID as `seq`. It does not match, and it does not know the `order_id` — that is
+engine-assigned and arrives on the private stream, which is what "acknowledgement, not result"
+means (Open Issue 008 §9h).
+
+**The stream ID is the sequence number.** No counter is kept beside it. A producer cannot know
+its own ID before `XADD` returns, so records are written with `SEQ_UNASSIGNED` and stamped on
+read by `contracts.with_seq()` — so every replay re-derives the same value.
+
+**Durability is `appendfsync always`, and the batching is what pays for it.** Sequential `XADD`
+under `always` measured 1,996 orders/sec; through the batching producer it is 72,034. The
+producer drains everything queued while the previous pipeline was in flight and writes it as
+one command batch, giving one fsync per batch instead of one per order. Remove the batching and
+the durability decision has to be reversed. Numbers and reasoning:
+`benchmarks/results/2.1-stream-durability.md`.
+
+**The halt state is a watchdog, not a flag.** When Redis goes away, orders are rejected `503`
+with a reason and `/health` says so; when it comes back the halt lifts on its own, with no
+gateway restart. A halt set only on a failed order would never lift.
+
+Two paths reach Redis, and the second one is easy to forget: `current_user_id` reads the session
+before the order handler runs. An early version answered `500` on `POST /orders` while `/health`
+correctly reported the halt, because only the order path was handled. The exception handler in
+`app.py` covers both.
+
+`engine_stub/` is retained but no longer called. The end-of-week-2 integration point removes it,
+when Dev A's naive model starts consuming the stream (Appendix D.2).
 
 ## Three things that look like details and are not
 

@@ -40,6 +40,26 @@ book_depth = 10
 # a trading day rather than a quiet minute. Configurable, and stamped into the stream from 2.1.
 real_seconds_per_simulated_minute = 1
 
+[streams]
+# The durable ordered log. Open Issue 003: Redis Streams, and the stream ID *is* the sequence
+# number — never a parallel counter.
+inbound = "qa.inbound"
+outbound = "qa.outbound"
+
+# MAXLEN ~ trimming. Two million entries, not the 5–10 M in Open Issue 003 section 8.4: that
+# figure predates the no-snapshots decision, and both Open Issue 002 and Open Issue 004 settle
+# on ~2 M, where replaying from the start of the stream takes on the order of ten seconds.
+maxlen = 2000000
+
+# Group commit. The producer drains everything queued while the previous flush was in flight and
+# writes it as one pipeline, so `appendfsync always` costs one fsync per batch rather than one
+# per order (Open Issue 003 section 8.2).
+batch_max = 256
+
+# How often the halt watchdog pings Redis. Success Criterion 5 requires the halt to clear
+# without a gateway restart, so this cannot be a flag set once on failure.
+health_poll_ms = 500
+
 [symbols]
 # The ten symbols and their tick sizes are decided in Task 5.1, from replayed crypto history.
 # Deliberately empty until then rather than filled with invented values.

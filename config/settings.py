@@ -57,6 +57,11 @@ class Settings:
     conflation_hz: int
     book_depth: int
     replay_real_seconds_per_simulated_minute: int
+    stream_inbound: str
+    stream_outbound: str
+    stream_maxlen: int
+    stream_batch_max: int
+    stream_health_poll_ms: int
     symbols: tuple[str, ...]
 
     # --- infrastructure: from the environment, NOT covered by config_hash -------------------
@@ -93,6 +98,11 @@ class Settings:
             replay_real_seconds_per_simulated_minute=_require(
                 table, "replay", "real_seconds_per_simulated_minute"
             ),
+            stream_inbound=_require(table, "streams", "inbound"),
+            stream_outbound=_require(table, "streams", "outbound"),
+            stream_maxlen=_require(table, "streams", "maxlen"),
+            stream_batch_max=_require(table, "streams", "batch_max"),
+            stream_health_poll_ms=_require(table, "streams", "health_poll_ms"),
             symbols=tuple(_require(table, "symbols", "listed")),
             redis_url=os.environ.get("QA_REDIS_URL", "redis://localhost:6379/0"),
             database_url=os.environ.get(

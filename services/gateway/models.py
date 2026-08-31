@@ -39,3 +39,41 @@ class Account(SQLModel, table=True):
     #: int64 ticks. Never a float below the presentation layer (Open Issue 016 section 6).
     cash_ticks: int = Field(sa_column=Column(BigInteger, nullable=False))
     created_at_ns: int = Field(sa_column=Column(BigInteger, nullable=False))
+
+
+class Position(SQLModel, table=True):
+    __tablename__ = "positions"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("users.id"), index=True, nullable=False)
+    )
+    symbol_id: int = Field(sa_column=Column(BigInteger, index=True, nullable=False))
+    qty: int = Field(sa_column=Column(BigInteger, nullable=False, default=0))
+    updated_at_ns: int = Field(sa_column=Column(BigInteger, nullable=False))
+
+
+class OpenOrder(SQLModel, table=True):
+    __tablename__ = "open_orders"
+
+    order_id: int = Field(sa_column=Column(BigInteger, primary_key=True))
+    client_order_id: int = Field(sa_column=Column(BigInteger, nullable=False))
+    user_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("users.id"), index=True, nullable=False)
+    )
+    symbol_id: int = Field(sa_column=Column(BigInteger, nullable=False))
+    side: int = Field(sa_column=Column(BigInteger, nullable=False))
+    price_ticks: int = Field(sa_column=Column(BigInteger, nullable=False))
+    qty: int = Field(sa_column=Column(BigInteger, nullable=False))
+    remaining_qty: int = Field(sa_column=Column(BigInteger, nullable=False))
+    tif: int = Field(sa_column=Column(BigInteger, nullable=False))
+    created_at_ns: int = Field(sa_column=Column(BigInteger, nullable=False))
+
+
+class HouseFeeAccount(SQLModel, table=True):
+    __tablename__ = "house_fees"
+
+    id: int | None = Field(default=None, primary_key=True)
+    fee_ticks: int = Field(sa_column=Column(BigInteger, nullable=False, default=0))
+    updated_at_ns: int = Field(sa_column=Column(BigInteger, nullable=False))
+

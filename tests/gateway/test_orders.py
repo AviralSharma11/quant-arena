@@ -1,23 +1,31 @@
-"""Success Criterion 3 — POST /orders returns 202 with an order id; malformed returns 400."""
+"""POST /orders returns 202; malformed returns 400.
+
+Task 1.3 criterion 3, updated for Task 2.1: the gateway is now the single producer and `XADD`s
+to the inbound stream instead of calling an engine. The acknowledgement therefore carries a real
+`seq` — the Redis stream ID — and a null `order_id`, because the engine assigns that and it
+arrives on the private stream.
+"""
 
 from __future__ import annotations
+
+import re
 
 import pytest
 from fastapi.testclient import TestClient
 
-from contracts.v1.generated.contracts import RejectReason
 
 VALID = {"client_order_id": 1, "symbol_id": 1, "side": 1, "tif": 1,
          "price_ticks": 6_412_500, "qty": 3}
 
 
-def test_a_valid_order_is_accepted_with_an_order_id(logged_in: TestClient):
+def test_a_valid_order_is_accepted_and_sequenced(logged_in: TestClient):
     response = logged_in.post("/orders", json=VALID)
     assert response.status_code == 202, response.text
     body = response.json()
     assert body["status"] == "accepted"
     assert body["client_order_id"] == VALID["client_order_id"]
-    assert isinstance(body["order_id"], int) and body["order_id"] > 0
+    # A Redis stream ID: <milliseconds>-<ordinal>.
+    assert re.fullmatch(r"\d+-\d+", body["seq"]), body["seq"]
 
 
 def test_the_acknowledgement_is_not_a_result(logged_in: TestClient):
@@ -27,18 +35,21 @@ def test_the_acknowledgement_is_not_a_result(logged_in: TestClient):
     assert "fills" not in body and "price" not in body
 
 
-def test_seq_is_null_until_there_is_a_stream(logged_in: TestClient):
-    """The Redis stream id IS the sequence number (Open Issue 003), and there is no stream
-    until Task 2.1. Null is honest; a locally invented counter would not be."""
-    assert logged_in.post("/orders", json=VALID).json()["seq"] is None
+def test_order_id_is_null_because_the_engine_assigns_it(logged_in: TestClient):
+    """The gateway appends to the stream; it does not match. Reporting an order_id it does not
+    have would be inventing one — and Open Issue 008 §9h makes this an acknowledgement."""
+    assert logged_in.post("/orders", json=VALID).json()["order_id"] is None
 
 
-def test_order_ids_are_monotonic(logged_in: TestClient):
-    ids = [
-        logged_in.post("/orders", json={**VALID, "client_order_id": n}).json()["order_id"]
+def test_sequence_numbers_are_monotonic(logged_in: TestClient):
+    """Task 2.1 Success Criterion 1. Ordering is not computed — it follows from there being
+    exactly one writer to one stream."""
+    seqs = [
+        logged_in.post("/orders", json={**VALID, "client_order_id": n}).json()["seq"]
         for n in range(1, 6)
     ]
-    assert ids == sorted(ids) and len(set(ids)) == len(ids)
+    keys = [tuple(int(part) for part in s.split("-")) for s in seqs]
+    assert keys == sorted(keys) and len(set(keys)) == len(keys)
 
 
 @pytest.mark.parametrize(
@@ -79,31 +90,21 @@ def test_authentication_is_checked_before_the_body(client: TestClient):
 # --- cancel ------------------------------------------------------------------------------------
 
 
-def test_cancel_by_client_order_id(logged_in: TestClient):
+def test_cancel_by_client_order_id_is_sequenced(logged_in: TestClient):
     logged_in.post("/orders", json=VALID)
     response = logged_in.request(
         "DELETE", f"/orders/{VALID['client_order_id']}", json={"client_order_id": 99}
     )
     assert response.status_code == 202, response.text
-    assert response.json()["status"] == "cancelled"
+    assert response.json()["status"] == "accepted"
+    assert re.fullmatch(r"\d+-\d+", response.json()["seq"])
 
 
-def test_cancelling_an_unknown_order_is_409_with_a_reason(logged_in: TestClient):
-    """Never a 404 — a cancel answers the same shape as a submit
-    (contracts/v1/rest_and_ws.md section 2.2)."""
+def test_the_gateway_no_longer_judges_whether_an_order_exists(logged_in: TestClient):
+    """Before 2.1 an unknown cancel was a 409 from the in-process stub. The gateway does not
+    hold the book any more, so it records the request and lets the engine answer — the reply
+    arrives on the private stream. Pretending to know here would be the gateway inventing an
+    outcome it cannot have."""
     response = logged_in.request("DELETE", "/orders/424242", json={"client_order_id": 99})
-    assert response.status_code == 409
-    assert response.json()["detail"]["reason"] == int(RejectReason.UNKNOWN_ORDER)
-
-
-def test_one_user_cannot_cancel_another_users_order(logged_in: TestClient, client: TestClient):
-    logged_in.post("/orders", json=VALID)
-    logged_in.post("/auth/logout")
-
-    client.post("/auth/register", json={"username": "intruder", "password": "correct-horse-bat"})
-    client.post("/auth/login", json={"username": "intruder", "password": "correct-horse-bat"})
-    response = client.request(
-        "DELETE", f"/orders/{VALID['client_order_id']}", json={"client_order_id": 1}
-    )
-    assert response.status_code == 409
-    assert response.json()["detail"]["reason"] == int(RejectReason.UNKNOWN_ORDER)
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
