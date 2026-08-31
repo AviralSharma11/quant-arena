@@ -245,10 +245,11 @@ anything for them to do.
 - No email verification — deferred to Phase 2.
 
 #### Dependencies
-Tasks 1.1, 1.2.
+Task 1.1 only. **Not 1.2** — the naive model is Dev A's, same week. This task is built against
+Dev B's own stub engine and swapped at the end-of-week-2 integration point (Appendix D.2).
 
 #### Deliverables
-Gateway application · auth endpoints · order endpoints · account read-model schema.
+Gateway application · auth endpoints · order endpoints · account read-model schema · stub engine.
 
 ---
 
@@ -980,7 +981,9 @@ broadcast quickly* — it is **what to decline to send.**
 - Private data must never be dropped.
 
 #### Dependencies
-Task 4.2.
+**Task 2.1, not 4.2.** Fan-out consumes the outbound stream and does not care which engine
+produced the events — the stream exists from week 2. Appendix D.1 records the 4.2 line as a plan
+error; correcting it is what lets fan-out start in week 4.
 
 #### Deliverables
 Fan-out process · WebSocket server · conflation loop · L1/L2/tape/bar stream builders · private
@@ -1064,7 +1067,9 @@ drops frames. **The answer is the same: conflate at the boundary.**
 - Do not poll the REST endpoints; they exist solely for re-synchronisation after a gap.
 
 #### Dependencies
-Task 5.2.
+**Task 1.1 contracts only.** 5.4a (scaffold, week 1) and 5.4b (auth screens, week 2) need nothing
+else; 5.4c (WebSocket client, week 4) works against the mock WebSocket server until 5.2b lands.
+Not blocked on 5.2 — Appendix D.3 schedules this across weeks 1, 2 and 4.
 
 #### Deliverables
 Frontend project · auth screens · WebSocket client with gap detection · rAF render loop ·
