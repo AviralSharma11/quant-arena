@@ -174,3 +174,18 @@ be raised against this issue.
 |---|---|---|
 | 2026-08-28 | OPEN | Stack compiled from OI 001–018; ten choices identified as never decided |
 | 2026-08-28 | **RESOLVED** | All ten adopted as recommended. 19j (deployment target) remains deferred by prior decision to week 3 of the execution plan. |
+
+---
+
+## Amendment 2026-08-31 — react-router-dom added
+
+React ships no router. Approved during Task 5.4a for the three screens fixed by Open Issue 014.
+Hand-rolling roughly 40 lines was the alternative considered and rejected: react-router-dom also
+carries the protected-route wrapper 5.4b needs for auth. No other frontend dependency is added —
+there is deliberately no JavaScript test framework, because Node strips TypeScript natively and
+the route table can be inspected and the built app served without one.
+
+| Date | Status | Note |
+|---|---|---|
+| 2026-08-31 | AMENDED | `react-router-dom` added to the closed stack list; `CLAUDE.md` amended in the same change. |
+
