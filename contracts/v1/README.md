@@ -3,8 +3,12 @@
 Everything in Quant Arena is written against this directory. It is the contract between every
 component *and* the contract between the two developers (Open Issue 002 §6).
 
-**Status: PROPOSED by Dev B — awaiting Dev A sign-off.** Task 1.1 is joint. Freezing is a
-separate commit that flips this line and the header of `schema.toml` to FROZEN.
+**Status: FROZEN 2026-08-31 — agreed by Dev A and Dev B.** Task 1.1 is joint and both
+developers have signed off. Everything from week 1 onward is written against this directory.
+
+Changing a record from here is a schema change, not an edit. It needs both developers, a bump of
+`schema_version`, and — because Phase 1 has no snapshots (Open Issue 018 §13.1) — truncating the
+retained stream and rebuilding. Raise it rather than absorbing it.
 
 ## Layout
 

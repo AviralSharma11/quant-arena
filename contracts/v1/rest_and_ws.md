@@ -1,6 +1,6 @@
 # Contracts v1 — REST surface and WebSocket messages
 
-**Status: PROPOSED by Dev B — awaiting Dev A sign-off.** Task 1.1 is joint (`WEEKLY_PLAN.md`
+**Status: FROZEN 2026-08-31 — agreed by Dev A and Dev B.** Task 1.1 is joint (`WEEKLY_PLAN.md`
 Appendix D.2). The binary record layout is in `schema.toml`; this file is the other half of the
 same contract — the shapes that cross the network to a browser.
 
@@ -187,9 +187,18 @@ back-pressure to the fan-out process.
 
 ---
 
-## 4. Open against Dev A
+## 4. Frozen, but first exercised in week 5
 
-1. Does the private-stream JSON need `maker_order_id` / `taker_order_id` split out, or is the
-   `order_id` + `role` projection above sufficient for the trading screen?
-2. `GET /symbols` serving the enum tables — confirm the load generator (6.3) reads them from
-   there too, rather than importing the Python module, so that both paths are exercised.
+Both points below are settled as written above — that is what was signed off. They are recorded
+because neither has met real code yet, and the moment they will first be tested is when fan-out
+and the trading screen meet (5.2b and 6.1a, week 5).
+
+1. **Private-stream fills project to `order_id` + `role`**, rather than carrying
+   `maker_order_id` and `taker_order_id` separately. This is sufficient for the trading screen
+   as designed in Open Issue 014. If the screen turns out to need both sides named, that is a
+   contract amendment, not a quiet addition.
+2. **`GET /symbols` is the only source of the enum tables.** The load generator (6.3) reads them
+   from there rather than importing `contracts.py`, so that both paths are exercised instead of
+   one being assumed correct.
+
+Changing either is a schema change under the rules in `README.md`.

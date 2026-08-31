@@ -3,8 +3,12 @@
 # THIS IS THE SINGLE DEFINITION. The C++ header and the Python module are both generated
 # from this file by `generate.py`. Never hand-edit anything under `generated/`.
 #
-# Status: PROPOSED by Dev B — awaiting Dev A sign-off (Task 1.1 is joint; see WEEKLY_PLAN.md
-# Appendix D.2). Freezing this file is a separate commit that flips this line to FROZEN.
+# Status: FROZEN 2026-08-31 — agreed by Dev A and Dev B (Task 1.1 is joint; see WEEKLY_PLAN.md
+# Appendix D.2). Everything from week 1 onward is written against this file.
+#
+# Changing a record from here is a schema change, not an edit. It needs both developers, a bump
+# of schema_version, and — because Phase 1 has no snapshots (Open Issue 018 section 13.1) —
+# truncating the retained stream and rebuilding. Raise it rather than absorbing it.
 #
 # References: Open Issue 016 (schema and API surface), 002 (integer-only numerics),
 # 004 (record types), 008 (two identifiers), 003 (the Redis stream ID is the sequence number).

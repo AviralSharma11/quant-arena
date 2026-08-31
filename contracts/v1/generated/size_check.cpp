@@ -1,7 +1,7 @@
 // GENERATED FILE — DO NOT EDIT.
 //
 // Source:     contracts/v1/schema.toml
-// Source sha: 18bb7c3798cd8f892f94bb249bb840544e41f144139c46ded9b20c4cc29ea375
+// Source sha: d2b618e33b38860404c7fbda30403a18deb989887a91bd1b13ced9bbea3779fb
 // Regenerate: python contracts/v1/generate.py
 //
 // Hand-editing this file reintroduces exactly the C++/Python drift the generator exists to
