@@ -1,0 +1,12 @@
+# Runtime dependencies. Every entry is on the closed stack list in CLAUDE.md, or is the driver
+# that list implies (psycopg is "PostgreSQL", greenlet is what SQLAlchemy's async bridge runs on).
+# Task 1.4 folds these into the Docker image.
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlmodel==0.0.42
+SQLAlchemy==2.0.52
+psycopg[binary]==3.3.4
+greenlet==3.5.5
+redis==8.1.0
+argon2-cffi==25.1.0

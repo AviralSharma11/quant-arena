@@ -1,7 +1,8 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `a37b49b` · **Week 1** (28 Aug – 3 Sep)
-**State:** Contracts v1 frozen. On branch `task/1.1-contracts`, **not yet merged to `main`**.
+**Last updated:** 2026-08-31 · **HEAD** `4c09dfa` · **Week 1** (28 Aug – 3 Sep)
+**State:** Contracts v1 frozen and merged. Gateway skeleton on branch
+`task/1.3-gateway-skeleton`, pushed; PR not yet opened.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -11,27 +12,25 @@
 
 ## NOW
 
-**Task 1.3 · Gateway skeleton — FastAPI, sessions, accounts, plus the stub engine** — Dev B, week 1
+**Task 1.4 · Local Docker stack and shared configuration** — Dev B, week 1
 
-- **Step:** stand up FastAPI on uvicorn. Register/login/logout with Argon2id and Redis-backed
-  session cookies. Accounts with a virtual cash grant. `POST /orders` and
-  `DELETE /orders/{client_order_id}` validating against frozen `contracts/v1`. Build the stub
-  engine behind a thin interface.
-- **Files:** `services/gateway/`, `services/engine_stub/` — neither exists yet.
-- **Done when:** a user registers, logs in and receives virtual capital · the session survives an
-  app restart · `POST /orders` returns `202` with an order id, malformed returns `400` ·
-  passwords are Argon2id. (`WEEKLY_PLAN.md` task 1.3, Success Criteria 1–4.)
-- **Not in this step:** no risk checks or reservations (week 3) · no idempotency (week 3) ·
-  no Redis Streams (week 2) · no JWT · no email verification.
-- **Keep the stub engine behind a thin interface** — it is swapped at the end of week 2.
+- **Step:** write `docker-compose.yml` covering Redis, PostgreSQL and the gateway, plus the
+  shared config whose content hash every process logs at startup. The ad-hoc `docker run`
+  commands in `services/gateway/README.md` are what this replaces.
+- **Files:** `docker-compose.yml`, `Dockerfile`, `config/` — compose files do not exist yet.
+- **Done when:** `docker compose up` comes up clean from a fresh checkout · the gateway reaches
+  Redis and PostgreSQL and health checks pass · the config content hash appears in every
+  process's startup log · a README section documents the run procedure.
+  (`WEEKLY_PLAN.md` task 1.4, Success Criteria 1–4.)
+- **Not in this step:** no CI (3.3) · no deployment target (3.3) · no engine container yet.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **1.4** Local Docker stack and shared configuration (Dev B, wk 1)
-2. **5.4a** Frontend scaffold — Vite + TypeScript + React (Dev B, wk 1)
-3. **2.1** Redis Streams, durability, halt state (Dev B, wk 2) — **unblocks Dev A 4.2**
+1. **5.4a** Frontend scaffold — Vite + TypeScript + React (Dev B, wk 1)
+2. **2.1** Redis Streams, durability, halt state (Dev B, wk 2) — **unblocks Dev A 4.2**
+3. **2.2** Ledger writer and replay rebuild (Dev B, wk 2)
 
 ## Blocked / waiting
 
@@ -53,8 +52,8 @@ means something is wrong with the plan, not with the week.*
 | 1.1  Contracts — schema, REST, WS shapes | AB | 1 | done | `1ced47a` built, `a37b49b` frozen · 233 tests pass |
 | 1.2  Naive Python model engine | A | 1 | A:unknown | not yet reported |
 | 2.3  Hand-written matching scenarios (T1) | A | 1 | A:unknown | not yet reported |
-| 1.3  Gateway skeleton + stub engine | B | 1 | wip | — |
-| 1.4  Local Docker stack + shared config | B | 1 | todo | — |
+| 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
+| 1.4  Local Docker stack + shared config | B | 1 | wip | — |
 | 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | todo | — |
 | 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
 | 2.1  Redis Streams, durability, halt state | B | 2 | todo | **unblocks Dev A 4.2** |
@@ -108,10 +107,13 @@ Dev B's tasks with their Success Criteria as a live checklist. Deleted when the 
 - [x] No float, string or variable-width field — `test_conventions.py`
 
 **1.3 Gateway skeleton**
-- [ ] A user registers, logs in, and receives virtual capital
-- [ ] The session survives a restart of the app process (it lives in Redis)
-- [ ] `POST /orders` returns `202` with an order id; a malformed order returns `400`
-- [ ] Passwords stored as Argon2id hashes — no plaintext, no general-purpose hash
+- [x] Registers, logs in, receives virtual capital — `test_auth.py`; the grant is asserted in
+      the `accounts` table, not just in the response
+- [x] Session survives a restart — `test_restart.py`, a real uvicorn subprocess killed and
+      restarted. The two-`create_app()` version of this test was proven insufficient by
+      mutation: a class-level dict passed it
+- [x] `POST /orders` → `202` + order id, malformed → `400` — `test_orders.py`, 15 bad shapes
+- [x] Argon2id only — `test_auth.py`, including a sweep of every text column for the plaintext
 
 **1.4 Docker stack**
 - [ ] `docker compose up` comes up clean from a fresh checkout
@@ -139,6 +141,9 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-08-31 | Consumers accept the **current** `schema_version` only | OI 016 §2 justified compatibility as "one snapshot interval", but OI 018 §13.1 removed snapshots. A breaking change during development means truncate and rebuild | corrects OI 016 §2 |
 | 2026-08-31 | **Contracts v1 frozen**, both developers signed off | Everything from here is written against it; a change now needs both developers, a `schema_version` bump and a stream truncation | — |
 | 2026-08-31 | `open-issues/` un-gitignored and committed (`e6f2370`) | `CLAUDE.md` cites 001–019 as the top precedence tier; untracked files cannot be that | — |
+| 2026-08-31 | `INITIAL_CASH_TICKS` in `config/settings.py`, default 1,000,000 ticks | The grant amount is specified nowhere in the plan or the 19 open issues; 4.4's bots will need their own figure and this is where it goes | — |
+| 2026-08-31 | Gateway maps `RequestValidationError` to `400` | FastAPI's default is `422`; OI 008 §9h and 1.3 criterion 3 both require `400`. Without the handler the criterion fails silently | — |
+| 2026-08-31 | Money and timestamp columns declared `BIGINT` explicitly | A bare SQLModel `int` is a 32-bit `INTEGER` and holds neither an int64 tick amount nor a nanosecond timestamp | — |
 
 ## Deviations from the plan
 
@@ -152,9 +157,12 @@ decisions: a schedule deviation is not a design change.
 ## How to run it right now
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install pytest hypothesis   # first time only
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first time only
+docker start quant-arena-redis quant-arena-postgres    # see services/gateway/README.md
+.venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000   # docs at /docs
+
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest contracts/v1/tests -q
+.venv/bin/python -m pytest contracts/v1/tests tests/gateway -q    # 285 tests
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one — a green run carrying
 that skip has not verified Success Criterion 3. Superseded by the Docker stack in 1.4.
