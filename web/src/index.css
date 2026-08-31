@@ -1,0 +1,44 @@
+/* Minimal, on purpose. Open Issue 014 §11.1 rules out a design system and theming; this is
+   only enough that the scaffold is legible while the screens are placeholders. */
+
+:root {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: dark;
+  background: #14161a;
+  color: #d7dbe0;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+}
+
+nav {
+  display: flex;
+  gap: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #2a2f37;
+}
+
+nav a {
+  color: #8d95a1;
+  text-decoration: none;
+}
+
+nav a[aria-current="page"] {
+  color: #d7dbe0;
+  text-decoration: underline;
+}
+
+main {
+  padding-top: 1.5rem;
+}
+
+h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.pending {
+  color: #8d95a1;
+}
