@@ -1,0 +1,8 @@
+# Test dependencies. pytest and Hypothesis are named in the stack list; httpx is what
+# FastAPI's own TestClient is built on.
+
+-r requirements.txt
+
+pytest==9.1.1
+hypothesis==6.167.1
+httpx==0.28.1
