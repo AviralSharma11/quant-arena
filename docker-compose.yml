@@ -9,6 +9,21 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Durability is a Redis configuration now, not hand-written group commit (Open Issue 003).
+    # AOF is off by default, so without this the stream is not durable at all.
+    #
+    # `appendfsync always` flushes on every write and would be far too slow one order at a
+    # time; the gateway's StreamProducer pipelines concurrent appends into one command batch,
+    # giving one fsync per batch. That is group commit, done by Redis. Measurements and the
+    # reasoning are in benchmarks/results/2.1-stream-durability.md.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - always
+    volumes:
+      - redisdata:/data
     ports:
       - "6379:6379"          # exposed so the test suite can run on the host against this stack
     healthcheck:
@@ -69,3 +84,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

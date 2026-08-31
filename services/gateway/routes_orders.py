@@ -1,17 +1,22 @@
 """Order submission and cancellation.
 
-Open Issue 008 sub-decision 9h: **this API is acknowledgement-shaped, not result-shaped.**
-`202` means the order was received, not that it traded. Fills arrive on the private stream,
-which exists from week 5. Building the client around that from the start is cheap; retrofitting
-it is not.
+The gateway is the single **producer** (Open Issue 007): it `XADD`s validated requests to the
+inbound stream. Ordering is not computed here — it emerges from there being exactly one writer.
 
-Deliberately absent this week, and each is a later task rather than an oversight:
+Open Issue 008 §9h: **this API is acknowledgement-shaped, not result-shaped.** `202` means the
+request was durably recorded, not that it traded or that the order existed. `order_id` is
+therefore null — the engine assigns it, and it arrives on the private stream. `seq` is the
+Redis stream ID, which *is* the sequence number (Open Issue 003); it is never a counter kept
+alongside.
+
+Deliberately absent, each a later task rather than an oversight:
 
 - **No idempotency.** A repeated `client_order_id` is not detected yet — Task 3.2.
 - **No risk checks or reservations.** Nobody's cash is consulted — Task 3.1.
 - **No symbol existence check.** `symbol_id` is range-checked but not looked up; the symbol
   registry arrives with Task 5.1. `RejectReason.UNKNOWN_SYMBOL` already exists for it.
-- **No sequence number.** `seq` is the Redis stream id, and there is no stream until Task 2.1.
+- **Nothing consumes the inbound stream yet.** Dev A's naive model connects at the
+  end-of-week-2 integration point (Appendix D.2).
 """
 
 from __future__ import annotations
@@ -21,15 +26,10 @@ import time
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from contracts.v1.generated.contracts import (
-    CancelOrder,
-    OrderAccepted,
-    OrderCancelled,
-    Side,
-    SubmitOrder,
-    Tif,
-)
-from services.gateway.deps import CurrentUser, Engine
+from config.settings import Settings
+from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
+from services.gateway.deps import Config, CurrentUser, Streams
+from services.gateway.streams import ExchangeHalted
 
 router = APIRouter(tags=["orders"])
 
@@ -57,16 +57,18 @@ class CancelOrderRequest(BaseModel):
 
 class AcknowledgementResponse(BaseModel):
     client_order_id: int
-    order_id: int
-    #: The Redis stream id, once there is a stream to append to (Task 2.1). Null until then,
-    #: rather than a locally invented counter — Open Issue 003 forbids a parallel counter.
-    seq: str | None
+    #: Engine-assigned, so the gateway does not know it at append time. Null here; it arrives
+    #: on the private stream. Open Issue 008 §9h: this API is acknowledgement-shaped.
+    order_id: int | None
+    #: The Redis stream id — which *is* the sequence number (Open Issue 003). Never a counter
+    #: the gateway keeps alongside it.
+    seq: str
     status: str
 
 
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
-    body: SubmitOrderRequest, user_id: CurrentUser, engine: Engine
+    body: SubmitOrderRequest, user_id: CurrentUser, streams: Streams, settings: Config
 ) -> AcknowledgementResponse:
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
@@ -78,20 +80,21 @@ async def submit_order(
         price_ticks=body.price_ticks,
         qty=body.qty,
     )
-    result = engine.submit(order)
+    try:
+        stream_id = await streams.append(settings.stream_inbound, order)
+    except ExchangeHalted as halted:
+        # The exchange cannot durably record this. Fail loudly rather than time out silently,
+        # or worse, accept an order that was never written (Open Issue 003 §8.5).
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"status": "halted", "reason": halted.reason},
+        ) from halted
 
-    if isinstance(result, OrderAccepted):
-        return AcknowledgementResponse(
-            client_order_id=result.client_order_id,
-            order_id=result.order_id,
-            seq=None,
-            status="accepted",
-        )
-
-    # Failed validation or a risk check, and never reached the book (Open Issue 008 section 9h).
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"status": "rejected", "reason": int(result.reason)},
+    return AcknowledgementResponse(
+        client_order_id=order.client_order_id,
+        order_id=None,
+        seq=stream_id,
+        status="accepted",
     )
 
 
@@ -100,7 +103,8 @@ async def cancel_order(
     target_client_order_id: int,
     body: CancelOrderRequest,
     user_id: CurrentUser,
-    engine: Engine,
+    streams: Streams,
+    settings: Config,
 ) -> AcknowledgementResponse:
     if not 0 <= target_client_order_id <= U64_MAX:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "target_client_order_id out of range")
@@ -111,19 +115,19 @@ async def cancel_order(
         user_id=user_id,
         target_client_order_id=target_client_order_id,
     )
-    result = engine.cancel(cancel)
+    try:
+        stream_id = await streams.append(settings.stream_inbound, cancel)
+    except ExchangeHalted as halted:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"status": "halted", "reason": halted.reason},
+        ) from halted
 
-    if isinstance(result, OrderCancelled):
-        return AcknowledgementResponse(
-            client_order_id=result.client_order_id,
-            order_id=result.order_id,
-            seq=None,
-            status="cancelled",
-        )
-
-    # An unknown order is a 409 with a reason, never a 404 — so that a cancel answers the same
-    # shape as a submit (contracts/v1/rest_and_ws.md section 2.2).
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"status": "rejected", "reason": int(result.reason)},
+    # Accepted, not cancelled. Whether the order existed is the engine's answer, and it arrives
+    # on the private stream — the gateway no longer knows and must not pretend to.
+    return AcknowledgementResponse(
+        client_order_id=cancel.client_order_id,
+        order_id=None,
+        seq=stream_id,
+        status="accepted",
     )

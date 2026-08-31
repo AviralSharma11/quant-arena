@@ -35,6 +35,13 @@ SYNC_TEST_DSN = f"postgresql+psycopg://quant:quant@localhost:5432/{TEST_DB}"
 
 
 @pytest.fixture(scope="session")
+def anyio_backend() -> str:
+    """Async tests run on anyio's pytest plugin, which ships with FastAPI's own dependency on
+    anyio — so no test framework is added to the closed stack list for this."""
+    return "asyncio"
+
+
+@pytest.fixture(scope="session")
 def settings() -> Settings:
     """The real configuration file, with only *infrastructure* pointed at the test stores.
 
@@ -75,6 +82,7 @@ def _clean(settings: Settings, _database):
         conn.execute(text("truncate table accounts, users restart identity cascade"))
     engine.dispose()
 
+    # flushdb clears sessions AND the streams, so no test inherits another's stream entries.
     r = redis_sync.Redis.from_url(settings.redis_url)
     r.flushdb()
     r.close()

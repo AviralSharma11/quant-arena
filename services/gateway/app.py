@@ -8,9 +8,10 @@ about a session lives on the app object.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -28,6 +29,14 @@ from services.gateway.engine_port import EnginePort
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
 from services.gateway.sessions import SessionStore
+from services.gateway.streams import (
+    UNREACHABLE,
+    ExchangeHalted,
+    HaltReason,
+    HaltState,
+    StreamProducer,
+    watch_health,
+)
 
 
 def create_app(
@@ -38,6 +47,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         redis = Redis.from_url(settings.redis_url, decode_responses=True)
+        # A second client, deliberately NOT decoding responses. Stream entries carry packed
+        # fixed-width records; decoding them as text would corrupt the money path silently.
+        stream_redis = Redis.from_url(settings.redis_url, decode_responses=False)
         db = create_async_engine(settings.database_url, pool_pre_ping=True)
         async with db.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
@@ -50,11 +62,40 @@ def create_app(
         app.state.db_sessionmaker = async_sessionmaker(
             db, class_=AsyncSession, expire_on_commit=False
         )
-        # The one load-bearing stub (Appendix D.2). Swapped at the end of week 2.
+        # Retained until the end-of-week-2 integration point removes it (Appendix D.2). No
+        # longer on the order path — the gateway XADDs to the stream instead, and Dev A's
+        # naive model consumes it.
         app.state.engine = engine or StubEngine()
+
+        app.state.halt = HaltState()
+        app.state.streams = StreamProducer(
+            stream_redis,
+            app.state.halt,
+            maxlen=settings.stream_maxlen,
+            batch_max=settings.stream_batch_max,
+        )
+        app.state.streams.start()
+        health_stop = asyncio.Event()
+        health_task = asyncio.create_task(
+            watch_health(
+                stream_redis,
+                app.state.halt,
+                poll_ms=settings.stream_health_poll_ms,
+                stop=health_stop,
+            ),
+            name="halt-watchdog",
+        )
         try:
             yield
         finally:
+            health_stop.set()
+            health_task.cancel()
+            try:
+                await health_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            await app.state.streams.stop()
+            await stream_redis.aclose()
             await redis.aclose()
             await db.dispose()
 
@@ -72,9 +113,40 @@ def create_app(
             content={"detail": jsonable_encoder(exc.errors())},
         )
 
+    def _halted_response(request, detail: str) -> JSONResponse:
+        halt: HaltState = request.app.state.halt
+        halt.halt(HaltReason.REDIS_UNREACHABLE, detail)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": {"status": "halted", "reason": halt.reason}},
+        )
+
+    for _unreachable in UNREACHABLE:
+
+        @app.exception_handler(_unreachable)
+        async def redis_unreachable(request: Request, exc: Exception) -> JSONResponse:
+            """Redis is on the critical path, so its absence must fail loudly everywhere.
+
+            Not only on the order path: `current_user_id` reads the session from Redis and runs
+            *before* the order handler, so without this a halted exchange answered `500` on
+            `POST /orders` while `/health` correctly reported the halt. Open Issue 003 §8.5
+            requires a clear reason, and a 500 is not one.
+            """
+            return _halted_response(request, str(exc))
+
+    @app.exception_handler(ExchangeHalted)
+    async def exchange_halted(request: Request, exc: ExchangeHalted) -> JSONResponse:
+        return _halted_response(request, exc.reason)
+
     @app.get("/health", tags=["ops"])
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health(request: Request) -> dict[str, object]:
+        """Liveness, plus the halt state.
+
+        Open Issue 003 §8.5 requires that an unreachable Redis be *visible* rather than a
+        silent timeout, so the halt is surfaced here and not only in order rejections.
+        """
+        halt: HaltState = request.app.state.halt
+        return {"status": "halted" if halt.halted else "ok", **halt.as_dict()}
 
     app.include_router(auth_router)
     app.include_router(orders_router)
