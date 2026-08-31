@@ -1,1 +1,6 @@
 open-issues/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.hypothesis/
