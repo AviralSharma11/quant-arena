@@ -10,6 +10,7 @@ between tests, so the development data is never touched.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -35,14 +36,19 @@ SYNC_TEST_DSN = f"postgresql+psycopg://quant:quant@localhost:5432/{TEST_DB}"
 
 @pytest.fixture(scope="session")
 def settings() -> Settings:
-    return Settings(
+    """The real configuration file, with only *infrastructure* pointed at the test stores.
+
+    Domain parameters are never overridden here — the tests assert against the same
+    config/quant_arena.toml the gateway ships with, so a bad value in it fails the suite.
+    """
+    return dataclasses.replace(
+        Settings.load(),
         database_url=f"postgresql+psycopg://quant:quant@localhost:5432/{TEST_DB}",
         redis_url="redis://localhost:6379/15",
         # False only so the httpx cookie jar carries the cookie over plain http in tests.
         # The Secure flag itself is asserted directly against the Set-Cookie header in
         # test_sessions.py, which is the honest way to check it.
         session_cookie_secure=False,
-        initial_cash_ticks=1_000_000,
     )
 
 

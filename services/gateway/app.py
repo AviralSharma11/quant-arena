@@ -21,6 +21,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config.settings import Settings
 from config.settings import settings as default_settings
+from config.startup import log_startup
 from services.engine_stub import StubEngine
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
 from services.gateway.engine_port import EnginePort
@@ -42,6 +43,8 @@ def create_app(
             await conn.run_sync(SQLModel.metadata.create_all)
 
         app.state.settings = settings
+        # Task 1.4 criterion 3: the configuration hash appears in every process's startup log.
+        app.state.startup_record = log_startup("gateway", settings)
         app.state.redis = redis
         app.state.sessions = SessionStore(redis, settings.session_ttl_seconds)
         app.state.db_sessionmaker = async_sessionmaker(

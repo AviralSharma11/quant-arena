@@ -8,24 +8,25 @@ Task 1.3 builds the skeleton: sessions, accounts, and the order endpoints. No ri
 
 ## Running it
 
+The whole stack, gateway included:
+
 ```bash
-docker start quant-arena-redis quant-arena-postgres     # or docker run, see below
+docker compose up --build            # from the repository root
+```
+
+Or the stores in containers and the gateway on the host, so reloads are instant:
+
+```bash
+docker compose up -d redis postgres
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 ```
 
 Interactive docs at `http://localhost:8000/docs`. Set `QA_SESSION_COOKIE_SECURE=false` when
-driving it from a browser over plain http, or the browser will silently discard the cookie.
+driving it from a browser over plain http, or the browser will silently discard the cookie —
+`docker-compose.yml` already does this for the containerised gateway.
 
-First time, to create the containers:
-
-```bash
-docker run -d --name quant-arena-redis -p 6379:6379 redis:7-alpine
-docker run -d --name quant-arena-postgres -p 5432:5432 \
-  -e POSTGRES_USER=quant -e POSTGRES_PASSWORD=quant -e POSTGRES_DB=quant_arena \
-  postgres:16-alpine
-```
-
-Task 1.4 replaces both commands with `docker compose up`.
+Domain parameters come from `config/quant_arena.toml` and nowhere else; the environment carries
+only infrastructure. See the root `README.md` for the full run procedure.
 
 ## Shape
 

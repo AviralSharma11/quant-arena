@@ -1,0 +1,71 @@
+# One command brings the stack up: `docker compose up --build`.
+#
+# Deployment problems found in week 1 cost hours; the same problems found in week 7 cost the
+# deadline (WEEKLY_PLAN.md Task 1.4). No Kubernetes — Open Issue 019.
+
+name: quant-arena
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"          # exposed so the test suite can run on the host against this stack
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quant
+      # Overridable from the environment so the file never has to hold a real secret.
+      # Task 3.3 handles secrets for the public deployment.
+      POSTGRES_PASSWORD: ${QA_POSTGRES_PASSWORD:-quant}
+      POSTGRES_DB: quant_arena
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant -d quant_arena"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    build: .
+    restart: unless-stopped
+    # `service_healthy`, not `service_started`: the gateway creates its tables on startup, so a
+    # PostgreSQL that is running but not yet accepting connections would fail the boot.
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      # Infrastructure only. Every domain parameter comes from config/quant_arena.toml, which
+      # is baked into the image and hashed into the startup log.
+      QA_REDIS_URL: redis://redis:6379/0
+      QA_DATABASE_URL: postgresql+psycopg://quant:${QA_POSTGRES_PASSWORD:-quant}@postgres:5432/quant_arena
+      # A browser silently discards a Secure cookie over plain http, and the local stack is
+      # http. Task 3.3 turns this back on behind TLS.
+      QA_SESSION_COOKIE_SECURE: "false"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  pgdata:

@@ -392,6 +392,11 @@ determinism and reproducibility all reuse.
 - No ORM on the write path; use bulk writes into the read model.
 - The ledger must never accept a write from the gateway or anywhere else — only the stream.
 - Do not make PostgreSQL authoritative for anything.
+- **Register `GET /orders/open` BEFORE `DELETE /orders/{target_client_order_id}`.** Found by
+  probing the live gateway on 2026-08-31: `GET /orders/open` currently answers `405`, not `404`,
+  because the router matches `open` as the path parameter of the existing cancel route. Declared
+  in the wrong order the literal path is shadowed and never reached — and the symptom is a
+  wrong-looking method error, not a missing route, so it does not read as a routing bug.
 
 #### Dependencies
 Task 2.1.

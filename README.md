@@ -1,5 +1,77 @@
 # Quant Arena
 
+## Running it
+
+Requires Docker Desktop. Nothing else — no Python, no Redis, no PostgreSQL on the host.
+
+```bash
+git clone https://github.com/AviralSharma11/quant-arena.git
+cd quant-arena
+docker compose up --build
+```
+
+That brings up Redis, PostgreSQL and the gateway, in that order, each waiting for the one
+before it to report healthy. The API is then at `http://localhost:8000`, with interactive
+documentation at `http://localhost:8000/docs`.
+
+```bash
+docker compose ps          # health of each service
+docker compose logs gateway
+docker compose down        # stop;  add -v to also delete the database volume
+```
+
+### Checking that it came up correctly
+
+```bash
+curl http://localhost:8000/health
+docker compose logs gateway | grep config_hash
+```
+
+The second command is the interesting one. Every process prints a single JSON line at startup
+carrying the SHA-256 of the configuration it just read:
+
+```json
+{"event":"startup","process":"gateway","config_hash":"98e81d78…","schema_version":1}
+```
+
+That hash makes a recorded session or a benchmark result self-describing — you can tell months
+later exactly which configuration produced it. It also means two processes that disagree about
+the configuration say so immediately, rather than producing quietly wrong output. Reproduce it
+with `shasum -a 256 config/quant_arena.toml`.
+
+### Configuration
+
+`config/quant_arena.toml` is the single version-controlled configuration file, read by every
+process. Domain parameters live there and nowhere else — there are no environment overrides and
+no code defaults, so a missing value is a startup error rather than a silent fallback.
+
+The environment carries only *infrastructure*: `QA_REDIS_URL`, `QA_DATABASE_URL`,
+`QA_SESSION_COOKIE_SECURE`. These differ between a laptop, CI and Docker while the configuration
+is identical, which is why they sit outside the hash.
+
+### Developing without Docker
+
+Run the stores in containers and the gateway on the host, so reloads are instant:
+
+```bash
+docker compose up -d redis postgres
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
+```
+
+### Tests
+
+```bash
+docker compose up -d redis postgres
+.venv/bin/python -m pytest -q
+```
+
+The suite runs against the real Redis and PostgreSQL, not fakes. `contracts/v1/tests` also
+compiles the generated C++ header with a C++20 compiler; without one it skips loudly, and a
+green run carrying that skip has not verified C++/Python size parity.
+
+------------------------------------------------------------------------
+
 ## Project Overview
 
 Quant Arena is a simulated electronic trading and quantitative research

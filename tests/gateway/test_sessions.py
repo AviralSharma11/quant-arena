@@ -68,14 +68,23 @@ def test_the_session_really_is_a_key_in_redis(settings: Settings, client: TestCl
         r.close()
 
 
-def test_the_app_holds_no_session_state_of_its_own(settings: Settings):
-    """A guard against the obvious regression: someone adds a dict 'just for speed'."""
+def test_the_session_store_keeps_nothing_in_memory(settings: Settings):
+    """A guard against the obvious regression: someone adds a cache 'just for speed'.
+
+    Looks at the store itself — both instance attributes and class attributes, since a
+    class-level dict is the version that survives `create_app()` being called twice and so
+    would otherwise slip past everything except the subprocess test in test_restart.py.
+    """
     with TestClient(create_app(settings)) as client:
         _login(client)
-        state = vars(client.app.state).get("_state", {})
-        for name, value in state.items():
-            assert not isinstance(value, dict) or not value, (
-                f"app.state.{name} is a non-empty dict; session state must live in Redis"
+        store = client.app.state.sessions
+        held = dict(vars(store))
+        held.update(
+            {k: v for k, v in vars(type(store)).items() if not k.startswith("__")}
+        )
+        for name, value in held.items():
+            assert not isinstance(value, (dict, set, list)) or not value, (
+                f"SessionStore.{name} is holding session state in memory; it must be in Redis"
             )
 
 
