@@ -1,0 +1,257 @@
+# Quant Arena — event schema, version 1.
+#
+# THIS IS THE SINGLE DEFINITION. The C++ header and the Python module are both generated
+# from this file by `generate.py`. Never hand-edit anything under `generated/`.
+#
+# Status: PROPOSED by Dev B — awaiting Dev A sign-off (Task 1.1 is joint; see WEEKLY_PLAN.md
+# Appendix D.2). Freezing this file is a separate commit that flips this line to FROZEN.
+#
+# References: Open Issue 016 (schema and API surface), 002 (integer-only numerics),
+# 004 (record types), 008 (two identifiers), 003 (the Redis stream ID is the sequence number).
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------------------------
+# Conventions — Open Issue 016 sub-decision 16e. Fixed once, so neither developer has to ask.
+# ---------------------------------------------------------------------------------------------
+[conventions]
+endianness   = "little"
+packing      = "packed"      # no padding anywhere; C++ uses #pragma pack(1), Python uses '<'
+money        = "int64 ticks — never floating point below the presentation layer"
+quantity     = "int64 units"
+timestamp    = "int64 nanoseconds, assigned by the gateway, never read inside the engine"
+order_id     = "uint64, monotonic, engine-assigned"
+client_order_id = "uint64, client-assigned, unique per user, mandatory"
+symbol       = "int16 id on the wire; the string name appears only at the presentation layer"
+field_naming = "snake_case, with units in the name (price_ticks, timestamp_ns)"
+
+# The closed type vocabulary. There is deliberately no syntax for a float, a string, or a
+# length-prefixed field — Success Criterion 5 is enforced by the grammar, not by review.
+[types]
+u8  = { struct = "B", cpp = "std::uint8_t",  size = 1 }
+u16 = { struct = "H", cpp = "std::uint16_t", size = 2 }
+i16 = { struct = "h", cpp = "std::int16_t",  size = 2 }
+u64 = { struct = "Q", cpp = "std::uint64_t", size = 8 }
+i64 = { struct = "q", cpp = "std::int64_t",  size = 8 }
+
+# ---------------------------------------------------------------------------------------------
+# The common header, prepended to every record by the generator so it cannot be forgotten.
+#
+# schema_version and record_type come first because a consumer must read them BEFORE it knows
+# which record it is holding, so their offsets have to be identical across all record types.
+#
+# seq_ms / seq_ord are the two halves of the Redis stream ID `<ms>-<seq>`, which Open Issue 003
+# fixes as THE sequence number. A producer cannot know its own stream ID before XADD returns,
+# so these are written as SEQ_UNASSIGNED (0) and populated by the consumer from the message id
+# via with_seq(). This is why no parallel counter is ever needed.
+# ---------------------------------------------------------------------------------------------
+[header]
+fields = [
+  { name = "schema_version", type = "u16", doc = "Version of this schema. Consumers accept the current version only." },
+  { name = "record_type",    type = "u16", enum = "RecordType", doc = "Discriminator. Fixed offset across every record." },
+  { name = "seq_ms",         type = "u64", doc = "Redis stream id, millisecond part. 0 until assigned on read." },
+  { name = "seq_ord",        type = "u64", doc = "Redis stream id, ordinal part. 0 until assigned on read." },
+  { name = "timestamp_ns",   type = "i64", doc = "Gateway-assigned wall clock, nanoseconds." },
+]
+
+# ---------------------------------------------------------------------------------------------
+# Enums — small integers with named constants, never strings.
+# ---------------------------------------------------------------------------------------------
+[[enums]]
+name = "Side"
+underlying = "u8"
+doc = "Order side. Also used for Fill.aggressor_side."
+values = [
+  { name = "BUY",  value = 1 },
+  { name = "SELL", value = 2 },
+]
+
+[[enums]]
+name = "Tif"
+underlying = "u8"
+doc = "Time in force. GTC and IOC only — nothing else is meaningful without a session clock."
+values = [
+  { name = "GTC", value = 1, doc = "Good till cancelled." },
+  { name = "IOC", value = 2, doc = "Immediate or cancel; any unfilled remainder is cancelled." },
+]
+
+[[enums]]
+name = "CancelReason"
+underlying = "u8"
+doc = "Why an order left the book. Distinguishes user-initiated from expiry."
+values = [
+  { name = "USER_REQUESTED", value = 1 },
+  { name = "IOC_EXPIRED",    value = 2, doc = "IOC remainder cancelled after aggressing." },
+]
+
+[[enums]]
+name = "RejectReason"
+underlying = "u16"
+doc = """Closed set. Adding a reason later is a schema change (Open Issue 016 section 10), so the
+full set is enumerated now even though the risk checks that raise most of them are week 3."""
+values = [
+  { name = "UNKNOWN_SYMBOL",            value = 1 },
+  { name = "INVALID_PRICE",             value = 2 },
+  { name = "INVALID_QUANTITY",          value = 3 },
+  { name = "INVALID_SIDE",              value = 4 },
+  { name = "INVALID_TIF",               value = 5 },
+  { name = "INSUFFICIENT_CASH",         value = 6 },
+  { name = "INSUFFICIENT_POSITION",     value = 7 },
+  { name = "UNKNOWN_ORDER",             value = 8,  doc = "Cancel referenced a client_order_id with no live order." },
+  { name = "NOT_ORDER_OWNER",           value = 9,  doc = "Cancel referenced another user's order." },
+  { name = "DUPLICATE_CLIENT_ORDER_ID", value = 10 },
+  { name = "EXCHANGE_HALTED",           value = 11 },
+  { name = "ACCOUNT_NOT_FOUND",         value = 12 },
+  { name = "ACCOUNT_ALREADY_EXISTS",    value = 13 },
+]
+
+# ---------------------------------------------------------------------------------------------
+# Inbound records — gateway to engine. Open Issue 016 sub-decision 16c.
+# ---------------------------------------------------------------------------------------------
+[[records]]
+name = "SubmitOrder"
+record_type = 1
+direction = "inbound"
+doc = "A new order. Matched by the engine."
+fields = [
+  { name = "client_order_id", type = "u64", doc = "Mandatory idempotency key, unique per user." },
+  { name = "user_id",         type = "u64" },
+  { name = "price_ticks",     type = "i64" },
+  { name = "qty",             type = "i64" },
+  { name = "symbol_id",       type = "i16" },
+  { name = "side",            type = "u8",  enum = "Side" },
+  { name = "tif",             type = "u8",  enum = "Tif" },
+]
+
+[[records]]
+name = "CancelOrder"
+record_type = 2
+direction = "inbound"
+doc = "Cancel by client order id — a client can cancel an order whose acknowledgement it never received."
+fields = [
+  { name = "client_order_id",        type = "u64", doc = "Idempotency key of the cancel itself." },
+  { name = "user_id",                type = "u64" },
+  { name = "target_client_order_id", type = "u64", doc = "The order being cancelled." },
+]
+
+[[records]]
+name = "CreateAccount"
+record_type = 3
+direction = "inbound"
+doc = "Forwarded by the engine untouched — the engine is money-blind."
+fields = [
+  { name = "client_order_id", type = "u64", doc = "Idempotency key." },
+  { name = "user_id",         type = "u64" },
+]
+
+[[records]]
+name = "CreditCash"
+record_type = 4
+direction = "inbound"
+doc = "Forwarded by the engine untouched."
+fields = [
+  { name = "client_order_id", type = "u64", doc = "Idempotency key." },
+  { name = "user_id",         type = "u64" },
+  { name = "amount_ticks",    type = "i64" },
+]
+
+# ---------------------------------------------------------------------------------------------
+# Outbound records — engine to ledger, fan-out and archiver.
+# ---------------------------------------------------------------------------------------------
+[[records]]
+name = "OrderAccepted"
+record_type = 10
+direction = "outbound"
+doc = """Order is live in the book. Carries price/qty/side/symbol because there are no snapshots
+(Open Issue 018 section 13.1): the ledger rebuilds open orders by replaying the OUTBOUND stream
+alone, and without these it would have to join against the inbound stream."""
+fields = [
+  { name = "order_id",        type = "u64", doc = "Engine-assigned." },
+  { name = "client_order_id", type = "u64" },
+  { name = "user_id",         type = "u64" },
+  { name = "price_ticks",     type = "i64" },
+  { name = "qty",             type = "i64", doc = "Quantity accepted onto the book." },
+  { name = "symbol_id",       type = "i16" },
+  { name = "side",            type = "u8",  enum = "Side" },
+  { name = "tif",             type = "u8",  enum = "Tif" },
+]
+
+[[records]]
+name = "OrderRejected"
+record_type = 11
+direction = "outbound"
+doc = "Order never reached the book. No order_id was assigned."
+fields = [
+  { name = "client_order_id", type = "u64" },
+  { name = "user_id",         type = "u64" },
+  { name = "symbol_id",       type = "i16" },
+  { name = "reason",          type = "u16", enum = "RejectReason" },
+]
+
+[[records]]
+name = "Fill"
+record_type = 12
+direction = "outbound"
+doc = """One trade. Both sides are named. aggressor_side is required for maker/taker fees
+(Open Issue 011 section 11.2) and cannot be derived after the fact."""
+fields = [
+  { name = "maker_order_id", type = "u64" },
+  { name = "taker_order_id", type = "u64" },
+  { name = "maker_user_id",  type = "u64" },
+  { name = "taker_user_id",  type = "u64" },
+  { name = "price_ticks",    type = "i64", doc = "Always the resting (maker) price — price-time priority." },
+  { name = "qty",            type = "i64" },
+  { name = "symbol_id",      type = "i16" },
+  { name = "aggressor_side", type = "u8",  enum = "Side" },
+]
+
+[[records]]
+name = "OrderCancelled"
+record_type = 13
+direction = "outbound"
+doc = "Order left the book without being fully filled."
+fields = [
+  { name = "order_id",        type = "u64" },
+  { name = "client_order_id", type = "u64" },
+  { name = "user_id",         type = "u64" },
+  { name = "remaining_qty",   type = "i64", doc = "Quantity removed from the book." },
+  { name = "symbol_id",       type = "i16" },
+  { name = "reason",          type = "u8", enum = "CancelReason" },
+]
+
+[[records]]
+name = "BookChanged"
+record_type = 14
+direction = "outbound"
+doc = """One aggregated price level, after the change. A fixed-size POD record cannot carry a
+variable list of levels, so the engine emits per-level updates and fan-out maintains its own
+book from them; the complete-L2-snapshot rule of Open Issue 006 governs the browser wire, not
+this record. qty_at_level = 0 means the level is now empty."""
+fields = [
+  { name = "price_ticks",  type = "i64" },
+  { name = "qty_at_level", type = "i64", doc = "Aggregate resting quantity at this price after the change. 0 = level removed." },
+  { name = "symbol_id",    type = "i16" },
+  { name = "side",         type = "u8", enum = "Side" },
+]
+
+[[records]]
+name = "AccountCreated"
+record_type = 15
+direction = "outbound"
+doc = "Forwarded record, now sequenced."
+fields = [
+  { name = "client_order_id",    type = "u64" },
+  { name = "user_id",            type = "u64" },
+  { name = "initial_cash_ticks", type = "i64" },
+]
+
+[[records]]
+name = "CashCredited"
+record_type = 16
+direction = "outbound"
+doc = "Forwarded record, now sequenced. The engine is money-blind and does not track balances."
+fields = [
+  { name = "client_order_id", type = "u64" },
+  { name = "user_id",         type = "u64" },
+  { name = "amount_ticks",    type = "i64" },
+]
