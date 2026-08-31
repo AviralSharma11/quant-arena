@@ -26,6 +26,7 @@ from config.startup import log_startup
 from services.engine_stub import StubEngine
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
 from services.gateway.engine_port import EnginePort
+from services.gateway.risk import RiskState
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
 from services.gateway.sessions import SessionStore
@@ -67,6 +68,9 @@ def create_app(
         # naive model consumes it.
         app.state.engine = engine or StubEngine()
 
+        async with app.state.db_sessionmaker() as session:
+            app.state.risk = await RiskState.from_db(session)
+
         app.state.halt = HaltState()
         app.state.streams = StreamProducer(
             stream_redis,
@@ -75,6 +79,16 @@ def create_app(
             batch_max=settings.stream_batch_max,
         )
         app.state.streams.start()
+        risk_stop = asyncio.Event()
+        app.state.risk_task = asyncio.create_task(
+            app.state.risk.watch_stream(
+                stream_redis,
+                settings.stream_outbound,
+                poll_ms=settings.stream_health_poll_ms,
+                stop=risk_stop,
+            ),
+            name="risk-stream-watcher",
+        )
         health_stop = asyncio.Event()
         health_task = asyncio.create_task(
             watch_health(
@@ -88,6 +102,12 @@ def create_app(
         try:
             yield
         finally:
+            risk_stop.set()
+            app.state.risk_task.cancel()
+            try:
+                await app.state.risk_task
+            except (asyncio.CancelledError, Exception):
+                pass
             health_stop.set()
             health_task.cancel()
             try:

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 
 VALID = {"client_order_id": 1, "symbol_id": 1, "side": 1, "tif": 1,
-         "price_ticks": 6_412_500, "qty": 3}
+         "price_ticks": 100_000, "qty": 3}
 
 
 def test_a_valid_order_is_accepted_and_sequenced(logged_in: TestClient):
@@ -45,7 +45,10 @@ def test_sequence_numbers_are_monotonic(logged_in: TestClient):
     """Task 2.1 Success Criterion 1. Ordering is not computed — it follows from there being
     exactly one writer to one stream."""
     seqs = [
-        logged_in.post("/orders", json={**VALID, "client_order_id": n}).json()["seq"]
+        logged_in.post(
+            "/orders",
+            json={**VALID, "client_order_id": n, "price_ticks": 100_000, "qty": 1},
+        ).json()["seq"]
         for n in range(1, 6)
     ]
     keys = [tuple(int(part) for part in s.split("-")) for s in seqs]
@@ -80,6 +83,16 @@ def test_malformed_orders_are_400(logged_in: TestClient, override: dict, why: st
 
 def test_an_order_without_a_session_is_401(client: TestClient):
     assert client.post("/orders", json=VALID).status_code == 401
+
+
+def test_order_exceeding_available_cash_is_rejected(logged_in: TestClient):
+    """Risk checks must happen before the gateway appends to the stream."""
+    body = {**VALID, "client_order_id": 999, "qty": 200_000, "price_ticks": 6_412_500}
+    response = logged_in.post("/orders", json=body)
+    assert response.status_code == 409, response.text
+    payload = response.json()
+    assert payload["detail"]["status"] == "rejected"
+    assert payload["detail"]["reason"] == "INSUFFICIENT_CASH"
 
 
 def test_authentication_is_checked_before_the_body(client: TestClient):

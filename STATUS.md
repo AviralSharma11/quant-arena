@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `bd321b3` · **Week 2** (4–10 Sep) — started 3 days early
-**State:** **Week 2 Dev B work complete** on branch `week-2-durable-event-flow`. 302 standalone tests pass (all suites green).
+**Last updated:** 2026-08-31 · **HEAD** `44035c8` · **Week 3** (11–17 Sep) — Task 3.1 complete
+**State:** 325 standalone tests pass (all suites green). 3.1 risk checks verified and merged.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -11,15 +11,14 @@
 
 ## NOW
 
-**Task 3.1 · Risk checks and in-memory reservations** — Dev B, week 3
+**Task 3.2 · Idempotency — atomic claim-and-append** — Dev B, week 3
 
-- **Step:** maintain settled cash/positions and open reservations in gateway process memory,
-  check `available_cash >= order_cost` before stream append, release reservations on fill/cancel.
-- **Files:** `services/gateway/risk.py`, `services/gateway/routes_orders.py`, `tests/gateway/`.
-- **Done when:** order exceeding available cash is rejected with 409 INSUFFICIENT_CASH · partial
-  fills release difference · cancels release on confirmed event.
-  (`WEEKLY_PLAN.md` task 3.1, Success Criteria 1–4.)
-- **Not in this step:** no database round trip on hot path · reservations stay in process memory.
+- **Step:** require `client_order_id` on every submission · write Lua script for atomic
+  claim-and-append · implement validate → reserve → claim-and-append ordering.
+- **Files:** `services/gateway/routes_orders.py`, `services/gateway/idempotency.py` (new).
+- **Done when:** same `client_order_id` twice produces one order; second returns stored outcome ·
+  no reservation leak on retry · duplicate submission with rejection returns identical answer.
+  (`WEEKLY_PLAN.md` task 3.2, Success Criteria 1–4.)
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
@@ -58,7 +57,7 @@ means something is wrong with the plan, not with the week.*
 | 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
 | 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
-| 3.1  Risk checks + in-memory reservations | B | 3 | wip | — |
+| 3.1  Risk checks + in-memory reservations | B | 3 | done | `44035c8` · 24 gateway order tests pass · available_cash check and reservation verified |
 | 3.2  Idempotency — atomic claim-and-append | B | 3 | todo | **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | deployment target decided here |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |

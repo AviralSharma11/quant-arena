@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from config.settings import Settings
@@ -92,8 +92,20 @@ class PortfolioResponse(BaseModel):
 
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
-    body: SubmitOrderRequest, user_id: CurrentUser, streams: Streams, settings: Config
+    body: SubmitOrderRequest,
+    request: Request,
+    user_id: CurrentUser,
+    streams: Streams,
+    settings: Config,
 ) -> AcknowledgementResponse:
+    risk = request.app.state.risk
+    order_cost = body.price_ticks * body.qty
+    if risk.available_cash(user_id) < order_cost:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
+        )
+
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
         client_order_id=body.client_order_id,
@@ -104,15 +116,27 @@ async def submit_order(
         price_ticks=body.price_ticks,
         qty=body.qty,
     )
+    risk.reserve(
+        user_id=user_id,
+        client_order_id=body.client_order_id,
+        symbol_id=body.symbol_id,
+        side=int(body.side),
+        price_ticks=body.price_ticks,
+        qty=body.qty,
+    )
     try:
         stream_id = await streams.append(settings.stream_inbound, order)
     except ExchangeHalted as halted:
         # The exchange cannot durably record this. Fail loudly rather than time out silently,
         # or worse, accept an order that was never written (Open Issue 003 §8.5).
+        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
+    except Exception:
+        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        raise
 
     return AcknowledgementResponse(
         client_order_id=order.client_order_id,
