@@ -79,7 +79,12 @@ def _clean(settings: Settings, _database):
     """Wipe both stores before every test, so no test can pass on another's leftovers."""
     engine = create_engine(SYNC_TEST_DSN)
     with engine.begin() as conn:
-        conn.execute(text("truncate table accounts, users restart identity cascade"))
+        conn.execute(
+            text(
+                "truncate table accounts, users, positions, open_orders, house_fees "
+                "restart identity cascade"
+            )
+        )
     engine.dispose()
 
     # flushdb clears sessions AND the streams, so no test inherits another's stream entries.

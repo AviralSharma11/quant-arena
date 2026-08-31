@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from config.settings import Settings
 from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
-from services.gateway.deps import Config, CurrentUser, Streams
+from services.gateway.deps import Config, CurrentUser, DbSession, Streams
 from services.gateway.streams import ExchangeHalted
 
 router = APIRouter(tags=["orders"])
@@ -66,6 +66,30 @@ class AcknowledgementResponse(BaseModel):
     status: str
 
 
+class OpenOrderItem(BaseModel):
+    order_id: int
+    client_order_id: int
+    user_id: int
+    symbol_id: int
+    side: int
+    price_ticks: int
+    qty: int
+    remaining_qty: int
+    tif: int
+    created_at_ns: int
+
+
+class PositionItem(BaseModel):
+    symbol_id: int
+    qty: int
+
+
+class PortfolioResponse(BaseModel):
+    user_id: int
+    cash_ticks: int
+    positions: list[PositionItem]
+
+
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
     body: SubmitOrderRequest, user_id: CurrentUser, streams: Streams, settings: Config
@@ -96,6 +120,58 @@ async def submit_order(
         seq=stream_id,
         status="accepted",
     )
+
+
+# --- Re-synchronisation endpoints (Open Issue 014 §14e) --------------------------------------
+#
+# IMPORTANT: GET /orders/open MUST be registered BEFORE DELETE /orders/{target_client_order_id}.
+# FastAPI route matching would otherwise treat "open" as the target_client_order_id path parameter
+# of the delete route, rejecting GET /orders/open with a 405 Method Not Allowed error.
+
+
+@router.get("/orders/open")
+async def get_open_orders(user_id: CurrentUser, db: DbSession) -> list[OpenOrderItem]:
+    """Retrieve open resting orders for the current user for stream gap re-synchronisation."""
+    from services.gateway.models import OpenOrder
+    from sqlmodel import select
+
+    result = await db.exec(
+        select(OpenOrder).where(OpenOrder.user_id == user_id).order_by(OpenOrder.order_id)
+    )
+    return [
+        OpenOrderItem(
+            order_id=o.order_id,
+            client_order_id=o.client_order_id,
+            user_id=o.user_id,
+            symbol_id=o.symbol_id,
+            side=o.side,
+            price_ticks=o.price_ticks,
+            qty=o.qty,
+            remaining_qty=o.remaining_qty,
+            tif=o.tif,
+            created_at_ns=o.created_at_ns,
+        )
+        for o in result.all()
+    ]
+
+
+@router.get("/portfolio")
+async def get_portfolio(user_id: CurrentUser, db: DbSession) -> PortfolioResponse:
+    """Retrieve settled cash and positions for the current user for stream gap re-sync."""
+    from services.gateway.models import Account, Position
+    from sqlmodel import select
+
+    acc_result = await db.exec(select(Account).where(Account.user_id == user_id))
+    acc = acc_result.first()
+    cash = acc.cash_ticks if acc is not None else 0
+
+    pos_result = await db.exec(select(Position).where(Position.user_id == user_id))
+    positions = [
+        PositionItem(symbol_id=p.symbol_id, qty=p.qty)
+        for p in pos_result.all()
+        if p.qty != 0
+    ]
+    return PortfolioResponse(user_id=user_id, cash_ticks=cash, positions=positions)
 
 
 @router.delete("/orders/{target_client_order_id}", status_code=status.HTTP_202_ACCEPTED)
@@ -131,3 +207,4 @@ async def cancel_order(
         seq=stream_id,
         status="accepted",
     )
+

@@ -100,6 +100,7 @@ def create_app(
             await db.dispose()
 
     app = FastAPI(title="Quant Arena Gateway", version="0.1.0", lifespan=lifespan)
+    app.state.settings = settings
 
     @app.exception_handler(RequestValidationError)
     async def malformed_request(_, exc: RequestValidationError) -> JSONResponse:
