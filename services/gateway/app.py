@@ -63,6 +63,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         async with app.state.db_sessionmaker() as session:
             app.state.risk = await RiskState.from_db(session)
+        # Rebuild reservations and balances by replaying the outbound stream, and finish
+        # before the first request is served. Task 3.1 Success Criterion 4: restarting the
+        # gateway rebuilds reservations identically. Starting the watcher and yielding would
+        # leave a window in which the gateway is answering with every commitment forgotten,
+        # so an account could spend the same ticks twice in the first moments after a restart.
+        app.state.risk_replayed = await app.state.risk.replay_from_stream(
+            stream_redis, settings.stream_outbound
+        )
 
         app.state.halt = HaltState()
         app.state.streams = StreamProducer(

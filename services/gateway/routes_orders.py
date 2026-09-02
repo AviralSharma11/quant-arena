@@ -23,9 +23,10 @@ end-of-week-2 integration point (Appendix D.2). The stub engine is gone.
 from __future__ import annotations
 
 import time
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from config.settings import Settings
 from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
@@ -48,8 +49,23 @@ class SubmitOrderRequest(BaseModel):
     side: Side
     tif: Tif
     #: A limit price of zero or less is not an order. RejectReason.INVALID_PRICE exists for it.
-    price_ticks: int = Field(gt=0, le=I64_MAX)
+    #: Omitted for a market order, where the gateway derives the banded limit instead.
+    price_ticks: int | None = Field(default=None, gt=0, le=I64_MAX)
     qty: int = Field(gt=0, le=I64_MAX)
+    #: "limit" (the default) or "market". A market order never reaches the engine as such —
+    #: the contract has no market order type, and the engine is deliberately simple. The
+    #: gateway converts it to a marketable limit order with a price band (Task 3.1).
+    order_type: Literal["limit", "market"] = "limit"
+
+    @model_validator(mode="after")
+    def _price_matches_order_type(self) -> "SubmitOrderRequest":
+        if self.order_type == "limit" and self.price_ticks is None:
+            raise ValueError("price_ticks is required for a limit order")
+        if self.order_type == "market" and self.price_ticks is not None:
+            raise ValueError(
+                "price_ticks must be omitted for a market order — the band sets it"
+            )
+        return self
 
 
 class CancelOrderRequest(BaseModel):
@@ -118,11 +134,47 @@ async def submit_order(
             status_code=status.HTTP_409_CONFLICT,
             detail={"status": "rejected", "reason": outcome.reason},
         )
-    # else: status == "in_progress" - this is either first submission or currently in flight
+    # Otherwise the status is in_progress.
+    # A retry that arrived while the original is still in flight. It must not submit
+    # alongside it: a duplicate here is a real trade against a real counterparty whose
+    # position also moved, and it cannot be undone without unwinding someone else's fill
+    # (Open Issue 008). The client is told to ask again, not answered with a second order.
+    if not outcome.claimed:
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq="",
+            status="in_progress",
+        )
 
-    # Step 2: validate available cash
     risk = request.app.state.risk
-    order_cost = body.price_ticks * body.qty
+
+    # Step 2: a market order becomes a marketable limit order, banded off the opposing side.
+    price_ticks = body.price_ticks
+    tif = int(body.tif)
+    if body.order_type == "market":
+        price_ticks = risk.banded_market_price(
+            symbol_id=body.symbol_id,
+            side=int(body.side),
+            band_bps=settings.market_order_band_bps,
+        )
+        if price_ticks is None:
+            # Nothing resting on the other side. There is no reference price, so there is no
+            # band, so there is no safe price to send — Success Criterion 6 is precisely that
+            # a market order into a thin book cannot execute outside its band.
+            await idempotency.record_rejected(
+                user_id, body.client_order_id, "INVALID_PRICE"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"status": "rejected", "reason": "INVALID_PRICE"},
+            )
+        # A market order that rested would not be a market order. Anything it cannot trade
+        # against the book on arrival is cancelled rather than left sitting at the band price.
+        tif = int(Tif.IOC)
+
+    # Step 3: validate available cash
+    order_cost = price_ticks * body.qty
     if risk.available_cash(user_id) < order_cost:
         # Reject and record the rejection
         await idempotency.record_rejected(
@@ -133,15 +185,15 @@ async def submit_order(
             detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
         )
 
-    # Step 3: reserve the cash
+    # Step 4: reserve the cash, at the price that will actually be sent
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
         client_order_id=body.client_order_id,
         user_id=user_id,
         symbol_id=body.symbol_id,
         side=int(body.side),
-        tif=int(body.tif),
-        price_ticks=body.price_ticks,
+        tif=tif,
+        price_ticks=price_ticks,
         qty=body.qty,
     )
     risk.reserve(
@@ -149,11 +201,11 @@ async def submit_order(
         client_order_id=body.client_order_id,
         symbol_id=body.symbol_id,
         side=int(body.side),
-        price_ticks=body.price_ticks,
+        price_ticks=price_ticks,
         qty=body.qty,
     )
 
-    # Step 4: append to stream (claim and append are atomic via the idempotency key)
+    # Step 5: append to stream (claim and append are atomic via the idempotency key)
     try:
         stream_id = await streams.append(settings.stream_inbound, order)
     except ExchangeHalted as halted:
@@ -272,7 +324,18 @@ async def cancel_order(
             status_code=status.HTTP_409_CONFLICT,
             detail={"status": "rejected", "reason": outcome.reason},
         )
-    # else: status == "in_progress" - this is either first submission or currently in flight
+    # Otherwise the status is in_progress.
+    # A retry that arrived while the original is still in flight. It must not submit
+    # alongside it: a duplicate here is a real trade against a real counterparty whose
+    # position also moved, and it cannot be undone without unwinding someone else's fill
+    # (Open Issue 008). The client is told to ask again, not answered with a second order.
+    if not outcome.claimed:
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq="",
+            status="in_progress",
+        )
 
     # Step 2: append the cancel to the stream
     cancel = CancelOrder.new(

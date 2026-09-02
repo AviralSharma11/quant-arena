@@ -31,8 +31,12 @@ IDEMPOTENCY_PREFIX = "qa.idempotent:"
 # ARGV[1] = TTL in seconds
 #
 # Returns:
-# - [1, outcome_json] if key already exists (duplicate)
-# - [2, nil] if key didn't exist and we set it to "in_progress" (new submission)
+# - [1, outcome_json] if the key already exists — a duplicate, whether the original finished
+#   (stored JSON) or is still in flight (the raw "in_progress" sentinel)
+# - [2, nil] if the key did not exist and this caller set it to "in_progress"
+#
+# Only one caller can ever get 2 for a given key, which is what makes a concurrent burst of
+# identical retries produce exactly one order.
 CLAIM_SCRIPT = """
 local key = KEYS[1]
 local ttl = tonumber(ARGV[1])
@@ -57,9 +61,18 @@ class IdempotencyOutcome:
     order_id: int | None = None
     seq: str | None = None
     reason: str | None = None
+    #: True only for the caller that actually won the claim — never stored, never returned to
+    #: a second caller. This is the whole distinction between "I hold this key, carry on" and
+    #: "somebody else holds it and is still in flight", and collapsing the two lets every
+    #: concurrent retry submit a second real order. Success Criterion 2 is exactly this case.
+    claimed: bool = False
 
     def to_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+        return {
+            k: v
+            for k, v in self.__dict__.items()
+            if v is not None and k != "claimed"
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "IdempotencyOutcome":
@@ -88,7 +101,9 @@ class IdempotencyStore:
         If the key was already claimed, returns the stored outcome.
 
         Returns:
-        - status="in_progress" if this is the first submission for this key
+        - `claimed=True`, status="in_progress" — this caller won the key and must proceed
+        - `claimed=False`, status="in_progress" — another request holds the key and is still
+          in flight, so this one must NOT submit; it answers 202 in_progress
         - status="accepted"|"rejected" with stored outcome if a previous submission completed
         """
         key = self._key(user_id, client_order_id)
@@ -102,11 +117,13 @@ class IdempotencyStore:
                 stored_dict = json.loads(result[1])
                 return IdempotencyOutcome.from_dict(stored_dict)
             except (json.JSONDecodeError, TypeError):
-                # Backward compat: if stored as plain string "in_progress"
+                # The raw sentinel "in_progress" — an original that has claimed the key but
+                # not yet finished. claimed stays False, so the caller waits rather than
+                # submitting alongside it.
                 return IdempotencyOutcome(status="in_progress")
         else:
-            # New submission: key was set to "in_progress"
-            return IdempotencyOutcome(status="in_progress")
+            # This caller set the key, so this caller owns the submission.
+            return IdempotencyOutcome(status="in_progress", claimed=True)
 
     async def record_accepted(
         self, user_id: int, client_order_id: int, order_id: int | None, seq: str
