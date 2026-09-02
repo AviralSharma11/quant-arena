@@ -30,6 +30,12 @@ cookie_samesite = "strict"
 # denial-of-service protection, it is exchange realism.
 max_orders_per_second = 1000
 
+# Task 3.1: a market order is a marketable limit order with a price band. 500 bps = 5%, the
+# figure named in the task ("a market buy becomes a limit buy at best_ask x 1.05"). It is the
+# only thing standing between a market order and a thin book, so it is configuration, not a
+# constant. A per-symbol band belongs with the symbol table in Task 5.1.
+market_order_band_bps = 500
+
 [market_data]
 # Open Issue 006: 20 Hz conflation, complete L2 snapshots, ten levels per side.
 conflation_hz = 20
@@ -59,6 +65,12 @@ batch_max = 256
 # How often the halt watchdog pings Redis. Success Criterion 5 requires the halt to clear
 # without a gateway restart, so this cannot be a flag set once on failure.
 health_poll_ms = 500
+
+[idempotency]
+# Open Issue 008: idempotency key TTL. A client can retry a request within this window and get
+# the same answer. One hour allows for persistent WiFi or browser tab closures; longer than a
+# session is rarely needed.
+ttl_seconds = 3600
 
 [symbols]
 # The ten symbols and their tick sizes are decided in Task 5.1, from replayed crypto history.

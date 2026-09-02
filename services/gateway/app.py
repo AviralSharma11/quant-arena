@@ -24,6 +24,8 @@ from config.settings import Settings
 from config.settings import settings as default_settings
 from config.startup import log_startup
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
+from services.gateway.idempotency import IdempotencyStore
+from services.gateway.risk import RiskState
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
 from services.gateway.sessions import SessionStore
@@ -55,9 +57,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.startup_record = log_startup("gateway", settings)
         app.state.redis = redis
         app.state.sessions = SessionStore(redis, settings.session_ttl_seconds)
+        app.state.idempotency = IdempotencyStore(redis, settings.idempotency_ttl_seconds)
         app.state.db_sessionmaker = async_sessionmaker(
             db, class_=AsyncSession, expire_on_commit=False
         )
+        async with app.state.db_sessionmaker() as session:
+            app.state.risk = await RiskState.from_db(session)
+        # Rebuild reservations and balances by replaying the outbound stream, and finish
+        # before the first request is served. Task 3.1 Success Criterion 4: restarting the
+        # gateway rebuilds reservations identically. Starting the watcher and yielding would
+        # leave a window in which the gateway is answering with every commitment forgotten,
+        # so an account could spend the same ticks twice in the first moments after a restart.
+        app.state.risk_replayed = await app.state.risk.replay_from_stream(
+            stream_redis, settings.stream_outbound
+        )
+
         app.state.halt = HaltState()
         app.state.streams = StreamProducer(
             stream_redis,
@@ -66,6 +80,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             batch_max=settings.stream_batch_max,
         )
         app.state.streams.start()
+        risk_stop = asyncio.Event()
+        app.state.risk_task = asyncio.create_task(
+            app.state.risk.watch_stream(
+                stream_redis,
+                settings.stream_outbound,
+                poll_ms=settings.stream_health_poll_ms,
+                stop=risk_stop,
+            ),
+            name="risk-stream-watcher",
+        )
         health_stop = asyncio.Event()
         health_task = asyncio.create_task(
             watch_health(
@@ -79,6 +103,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            risk_stop.set()
+            app.state.risk_task.cancel()
+            try:
+                await app.state.risk_task
+            except (asyncio.CancelledError, Exception):
+                pass
             health_stop.set()
             health_task.cancel()
             try:

@@ -23,13 +23,14 @@ end-of-week-2 integration point (Appendix D.2). The stub engine is gone.
 from __future__ import annotations
 
 import time
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, Field, model_validator
 
 from config.settings import Settings
 from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
-from services.gateway.deps import Config, CurrentUser, DbSession, Streams
+from services.gateway.deps import Config, CurrentUser, DbSession, Idempotency, Streams
 from services.gateway.streams import ExchangeHalted
 
 router = APIRouter(tags=["orders"])
@@ -48,8 +49,23 @@ class SubmitOrderRequest(BaseModel):
     side: Side
     tif: Tif
     #: A limit price of zero or less is not an order. RejectReason.INVALID_PRICE exists for it.
-    price_ticks: int = Field(gt=0, le=I64_MAX)
+    #: Omitted for a market order, where the gateway derives the banded limit instead.
+    price_ticks: int | None = Field(default=None, gt=0, le=I64_MAX)
     qty: int = Field(gt=0, le=I64_MAX)
+    #: "limit" (the default) or "market". A market order never reaches the engine as such —
+    #: the contract has no market order type, and the engine is deliberately simple. The
+    #: gateway converts it to a marketable limit order with a price band (Task 3.1).
+    order_type: Literal["limit", "market"] = "limit"
+
+    @model_validator(mode="after")
+    def _price_matches_order_type(self) -> "SubmitOrderRequest":
+        if self.order_type == "limit" and self.price_ticks is None:
+            raise ValueError("price_ticks is required for a limit order")
+        if self.order_type == "market" and self.price_ticks is not None:
+            raise ValueError(
+                "price_ticks must be omitted for a market order — the band sets it"
+            )
+        return self
 
 
 class CancelOrderRequest(BaseModel):
@@ -93,27 +109,128 @@ class PortfolioResponse(BaseModel):
 
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
-    body: SubmitOrderRequest, user_id: CurrentUser, streams: Streams, settings: Config
+    body: SubmitOrderRequest,
+    request: Request,
+    user_id: CurrentUser,
+    streams: Streams,
+    settings: Config,
+    idempotency: Idempotency,
 ) -> AcknowledgementResponse:
+    # Step 1: claim the idempotency key
+    outcome = await idempotency.claim(user_id, body.client_order_id)
+
+    # If this is a duplicate (not in_progress), return the stored outcome
+    if outcome.status == "accepted":
+        # Retry after acceptance: return the same order_id and seq
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=outcome.order_id,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    elif outcome.status == "rejected":
+        # Retry after rejection: return the same rejection
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    # Otherwise the status is in_progress.
+    # A retry that arrived while the original is still in flight. It must not submit
+    # alongside it: a duplicate here is a real trade against a real counterparty whose
+    # position also moved, and it cannot be undone without unwinding someone else's fill
+    # (Open Issue 008). The client is told to ask again, not answered with a second order.
+    if not outcome.claimed:
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq="",
+            status="in_progress",
+        )
+
+    risk = request.app.state.risk
+
+    # Step 2: a market order becomes a marketable limit order, banded off the opposing side.
+    price_ticks = body.price_ticks
+    tif = int(body.tif)
+    if body.order_type == "market":
+        price_ticks = risk.banded_market_price(
+            symbol_id=body.symbol_id,
+            side=int(body.side),
+            band_bps=settings.market_order_band_bps,
+        )
+        if price_ticks is None:
+            # Nothing resting on the other side. There is no reference price, so there is no
+            # band, so there is no safe price to send — Success Criterion 6 is precisely that
+            # a market order into a thin book cannot execute outside its band.
+            await idempotency.record_rejected(
+                user_id, body.client_order_id, "INVALID_PRICE"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"status": "rejected", "reason": "INVALID_PRICE"},
+            )
+        # A market order that rested would not be a market order. Anything it cannot trade
+        # against the book on arrival is cancelled rather than left sitting at the band price.
+        tif = int(Tif.IOC)
+
+    # Step 3: validate available cash
+    order_cost = price_ticks * body.qty
+    if risk.available_cash(user_id) < order_cost:
+        # Reject and record the rejection
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INSUFFICIENT_CASH"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
+        )
+
+    # Step 4: reserve the cash, at the price that will actually be sent
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
         client_order_id=body.client_order_id,
         user_id=user_id,
         symbol_id=body.symbol_id,
         side=int(body.side),
-        tif=int(body.tif),
-        price_ticks=body.price_ticks,
+        tif=tif,
+        price_ticks=price_ticks,
         qty=body.qty,
     )
+    risk.reserve(
+        user_id=user_id,
+        client_order_id=body.client_order_id,
+        symbol_id=body.symbol_id,
+        side=int(body.side),
+        price_ticks=price_ticks,
+        qty=body.qty,
+    )
+
+    # Step 5: append to stream (claim and append are atomic via the idempotency key)
     try:
         stream_id = await streams.append(settings.stream_inbound, order)
     except ExchangeHalted as halted:
         # The exchange cannot durably record this. Fail loudly rather than time out silently,
         # or worse, accept an order that was never written (Open Issue 003 §8.5).
+        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
+    except Exception:
+        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INTERNAL_ERROR"
+        )
+        raise
+
+    # Step 5: record the acceptance
+    # Note: order_id is None because the engine assigns it; we store None (not 0)
+    await idempotency.record_accepted(
+        user_id, body.client_order_id, None, stream_id
+    )
 
     return AcknowledgementResponse(
         client_order_id=order.client_order_id,
@@ -179,13 +296,48 @@ async def get_portfolio(user_id: CurrentUser, db: DbSession) -> PortfolioRespons
 async def cancel_order(
     target_client_order_id: int,
     body: CancelOrderRequest,
+    request: Request,
     user_id: CurrentUser,
     streams: Streams,
     settings: Config,
+    idempotency: Idempotency,
 ) -> AcknowledgementResponse:
     if not 0 <= target_client_order_id <= U64_MAX:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "target_client_order_id out of range")
 
+    # Step 1: claim the idempotency key for the cancel
+    outcome = await idempotency.claim(user_id, body.client_order_id)
+
+    # If this is a duplicate cancel (not in_progress), return the stored outcome
+    if outcome.status == "accepted":
+        # Retry after acceptance: return the same seq
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    elif outcome.status == "rejected":
+        # Retry after rejection: return the same rejection
+        # (Note: cancels are no-ops so rejections are rare, but handle for uniformity)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    # Otherwise the status is in_progress.
+    # A retry that arrived while the original is still in flight. It must not submit
+    # alongside it: a duplicate here is a real trade against a real counterparty whose
+    # position also moved, and it cannot be undone without unwinding someone else's fill
+    # (Open Issue 008). The client is told to ask again, not answered with a second order.
+    if not outcome.claimed:
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq="",
+            status="in_progress",
+        )
+
+    # Step 2: append the cancel to the stream
     cancel = CancelOrder.new(
         timestamp_ns=time.time_ns(),
         client_order_id=body.client_order_id,
@@ -195,10 +347,24 @@ async def cancel_order(
     try:
         stream_id = await streams.append(settings.stream_inbound, cancel)
     except ExchangeHalted as halted:
+        # Record the failure
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
+    except Exception:
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INTERNAL_ERROR"
+        )
+        raise
+
+    # Step 3: record the acceptance
+    await idempotency.record_accepted(
+        user_id, body.client_order_id, None, stream_id
+    )
 
     # Accepted, not cancelled. Whether the order existed is the engine's answer, and it arrives
     # on the private stream — the gateway no longer knows and must not pretend to.

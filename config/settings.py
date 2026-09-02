@@ -53,7 +53,9 @@ class Settings:
     session_ttl_seconds: int
     session_cookie_name: str
     session_cookie_samesite: str
+    idempotency_ttl_seconds: int
     max_orders_per_second: int
+    market_order_band_bps: int
     conflation_hz: int
     book_depth: int
     replay_real_seconds_per_simulated_minute: int
@@ -92,7 +94,9 @@ class Settings:
             session_ttl_seconds=_require(table, "session", "ttl_seconds"),
             session_cookie_name=_require(table, "session", "cookie_name"),
             session_cookie_samesite=_require(table, "session", "cookie_samesite"),
+            idempotency_ttl_seconds=_require(table, "idempotency", "ttl_seconds"),
             max_orders_per_second=_require(table, "limits", "max_orders_per_second"),
+            market_order_band_bps=_require(table, "limits", "market_order_band_bps"),
             conflation_hz=_require(table, "market_data", "conflation_hz"),
             book_depth=_require(table, "market_data", "book_depth"),
             replay_real_seconds_per_simulated_minute=_require(

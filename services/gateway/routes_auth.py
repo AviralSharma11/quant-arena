@@ -37,7 +37,10 @@ class RegisterResponse(BaseModel):
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
-    body: RegisterRequest, db: DbSession, settings: Config
+    body: RegisterRequest,
+    request: Request,
+    db: DbSession,
+    settings: Config,
 ) -> RegisterResponse:
     existing = await db.exec(select(User).where(User.username == body.username))
     if existing.first() is not None:
@@ -59,6 +62,7 @@ async def register(
     )
     db.add(account)
     await db.commit()
+    request.app.state.risk.settled_cash[user.id] = settings.initial_cash_ticks
 
     return RegisterResponse(
         user_id=user.id, username=user.username, cash_ticks=account.cash_ticks
