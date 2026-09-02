@@ -1,0 +1,114 @@
+# The per-commit gate. Task 3.3, Success Criteria 2 and 4: a push runs the fixed suite, a
+# failing suite blocks the merge, and the whole thing finishes in under two minutes.
+#
+# "Fixed" is the operative word. Generated and property-based tests are deselected with
+# `-m "not property"` and run by nightly.yml instead — Task 3.3's Boundaries block, enforced at
+# collection by the root conftest.py rather than by anyone remembering to label a test.
+#
+# No Kubernetes, no Prometheus, nothing beyond running tests and publishing images (Open Issue
+# 019, and 3.3's "do not gold-plate the pipeline").
+
+name: CI
+
+# The repository is private, so Actions minutes are metered rather than unlimited. A bare
+# `push:` would run the suite on every task-branch commit *and* again on the pull request,
+# paying twice for the same answer. The pull request is where the gate actually matters, since
+# work reaches main only through one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch makes the first run's answer worthless. Cancel it rather
+# than pay for it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Fixed suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Real Redis and real PostgreSQL, not fakes — the gateway suite proves that a session
+    # survives a process restart *because it lives in Redis*, and a fake would pass that test
+    # while the property was false (tests/gateway/conftest.py).
+    #
+    # The credentials are not free to choose: tests/gateway/conftest.py hardcodes
+    # `quant:quant@localhost:5432` and Redis logical database 15. Service containers are
+    # port-mapped onto the runner host, so those DSNs resolve here unchanged — but only if the
+    # user, password and ports below match exactly.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quant
+          POSTGRES_PASSWORD: quant
+          POSTGRES_DB: quant_arena
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quant -d quant_arena"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      # tests/web reads the route table by running the TypeScript through node, and builds the
+      # frontend with npm. Without node those tests skip, and 5.4a's criteria stop being checked.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      # Not redundant with test_scaffold.py's own `npm run build` test. Pytest collects
+      # tests/web/test_auth_screen.py before tests/web/test_scaffold.py, and the auth-screen
+      # test skips when web/dist is missing — so on a clean runner it would skip *before* the
+      # scaffold test ever creates dist. It passes locally only because dist is already lying
+      # around. Building here means 5.4b's route test actually runs in CI.
+      - name: Build the frontend
+        working-directory: web
+        run: npm run build
+
+      # contracts/v1/tests/test_sizes.py compiles a C++ translation unit to prove the Python
+      # struct layout and the engine's structs agree — Task 1.1, Success Criterion 3. It skips
+      # loudly without a compiler, and a green run carrying that skip has not verified the
+      # criterion. Fail here instead, so the skip can never go quiet.
+      - name: Assert a C++20 compiler is present
+        run: g++ --version
+
+      # Fails if contracts/v1/generated/ is stale relative to schema.toml. Cheap, and it runs
+      # before the suite so a stale-codegen failure is not mistaken for a test failure.
+      - name: Contracts codegen is current
+        run: python contracts/v1/generate.py --check
+
+      - name: Fixed suite
+        run: pytest -q -m "not property" --durations=10

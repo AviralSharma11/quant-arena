@@ -87,6 +87,8 @@ def test_a_missing_domain_parameter_fails_loudly(tmp_path: Path):
         cookie_samesite = "strict"
         [limits]
         max_orders_per_second = 1
+        [idempotency]
+        ttl_seconds = 1
         [market_data]
         conflation_hz = 20
         # book_depth deliberately missing

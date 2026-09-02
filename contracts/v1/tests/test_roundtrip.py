@@ -43,6 +43,14 @@ def strategy_for(record_name: str, cls):
     )
 
 
+# Marked by hand, unlike every other generated test in the repository. The root conftest.py
+# stamps `property` on anything Hypothesis has wrapped, but here `@given` wraps the *inner*
+# `check`, so the collected function carries no Hypothesis attribute for that hook to find.
+# 300 examples per record class is a generated test whichever function holds the decorator, and
+# Task 3.3 keeps those out of the per-commit suite. `test_packed_length_is_exactly_size` and
+# `test_extreme_values_survive` are deterministic and stay there, so per-commit still fails on
+# a wrong width or signedness.
+@pytest.mark.property
 @pytest.mark.parametrize("cls", contracts.ALL_RECORDS, ids=lambda c: c.__name__)
 def test_roundtrip_is_lossless(cls):
     @given(values=strategy_for(cls.__name__, cls))
