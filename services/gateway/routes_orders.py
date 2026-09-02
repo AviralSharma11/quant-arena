@@ -24,12 +24,12 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from config.settings import Settings
 from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
-from services.gateway.deps import Config, CurrentUser, DbSession, Streams
+from services.gateway.deps import Config, CurrentUser, DbSession, Idempotency, Streams
 from services.gateway.streams import ExchangeHalted
 
 router = APIRouter(tags=["orders"])
@@ -93,8 +93,47 @@ class PortfolioResponse(BaseModel):
 
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
-    body: SubmitOrderRequest, user_id: CurrentUser, streams: Streams, settings: Config
+    body: SubmitOrderRequest,
+    request: Request,
+    user_id: CurrentUser,
+    streams: Streams,
+    settings: Config,
+    idempotency: Idempotency,
 ) -> AcknowledgementResponse:
+    # Step 1: claim the idempotency key
+    outcome = await idempotency.claim(user_id, body.client_order_id)
+
+    # If this is a duplicate (not in_progress), return the stored outcome
+    if outcome.status == "accepted":
+        # Retry after acceptance: return the same order_id and seq
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=outcome.order_id,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    elif outcome.status == "rejected":
+        # Retry after rejection: return the same rejection
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    # else: status == "in_progress" - this is either first submission or currently in flight
+
+    # Step 2: validate available cash
+    risk = request.app.state.risk
+    order_cost = body.price_ticks * body.qty
+    if risk.available_cash(user_id) < order_cost:
+        # Reject and record the rejection
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INSUFFICIENT_CASH"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
+        )
+
+    # Step 3: reserve the cash
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
         client_order_id=body.client_order_id,
@@ -105,15 +144,41 @@ async def submit_order(
         price_ticks=body.price_ticks,
         qty=body.qty,
     )
+    risk.reserve(
+        user_id=user_id,
+        client_order_id=body.client_order_id,
+        symbol_id=body.symbol_id,
+        side=int(body.side),
+        price_ticks=body.price_ticks,
+        qty=body.qty,
+    )
+
+    # Step 4: append to stream (claim and append are atomic via the idempotency key)
     try:
         stream_id = await streams.append(settings.stream_inbound, order)
     except ExchangeHalted as halted:
         # The exchange cannot durably record this. Fail loudly rather than time out silently,
         # or worse, accept an order that was never written (Open Issue 003 §8.5).
+        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
+    except Exception:
+        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INTERNAL_ERROR"
+        )
+        raise
+
+    # Step 5: record the acceptance
+    # Note: order_id is None because the engine assigns it; we store None (not 0)
+    await idempotency.record_accepted(
+        user_id, body.client_order_id, None, stream_id
+    )
 
     return AcknowledgementResponse(
         client_order_id=order.client_order_id,
@@ -179,13 +244,37 @@ async def get_portfolio(user_id: CurrentUser, db: DbSession) -> PortfolioRespons
 async def cancel_order(
     target_client_order_id: int,
     body: CancelOrderRequest,
+    request: Request,
     user_id: CurrentUser,
     streams: Streams,
     settings: Config,
+    idempotency: Idempotency,
 ) -> AcknowledgementResponse:
     if not 0 <= target_client_order_id <= U64_MAX:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "target_client_order_id out of range")
 
+    # Step 1: claim the idempotency key for the cancel
+    outcome = await idempotency.claim(user_id, body.client_order_id)
+
+    # If this is a duplicate cancel (not in_progress), return the stored outcome
+    if outcome.status == "accepted":
+        # Retry after acceptance: return the same seq
+        return AcknowledgementResponse(
+            client_order_id=body.client_order_id,
+            order_id=None,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    elif outcome.status == "rejected":
+        # Retry after rejection: return the same rejection
+        # (Note: cancels are no-ops so rejections are rare, but handle for uniformity)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    # else: status == "in_progress" - this is either first submission or currently in flight
+
+    # Step 2: append the cancel to the stream
     cancel = CancelOrder.new(
         timestamp_ns=time.time_ns(),
         client_order_id=body.client_order_id,
@@ -195,10 +284,24 @@ async def cancel_order(
     try:
         stream_id = await streams.append(settings.stream_inbound, cancel)
     except ExchangeHalted as halted:
+        # Record the failure
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
+    except Exception:
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "INTERNAL_ERROR"
+        )
+        raise
+
+    # Step 3: record the acceptance
+    await idempotency.record_accepted(
+        user_id, body.client_order_id, None, stream_id
+    )
 
     # Accepted, not cancelled. Whether the order existed is the engine's answer, and it arrives
     # on the private stream — the gateway no longer knows and must not pretend to.

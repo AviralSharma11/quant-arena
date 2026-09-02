@@ -60,6 +60,12 @@ batch_max = 256
 # without a gateway restart, so this cannot be a flag set once on failure.
 health_poll_ms = 500
 
+[idempotency]
+# Open Issue 008: idempotency key TTL. A client can retry a request within this window and get
+# the same answer. One hour allows for persistent WiFi or browser tab closures; longer than a
+# session is rarely needed.
+ttl_seconds = 3600
+
 [symbols]
 # The ten symbols and their tick sizes are decided in Task 5.1, from replayed crypto history.
 # Deliberately empty until then rather than filled with invented values.

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 
 VALID = {"client_order_id": 1, "symbol_id": 1, "side": 1, "tif": 1,
-         "price_ticks": 6_412_500, "qty": 3}
+         "price_ticks": 100_000, "qty": 3}
 
 
 def test_a_valid_order_is_accepted_and_sequenced(logged_in: TestClient):
@@ -45,7 +45,10 @@ def test_sequence_numbers_are_monotonic(logged_in: TestClient):
     """Task 2.1 Success Criterion 1. Ordering is not computed — it follows from there being
     exactly one writer to one stream."""
     seqs = [
-        logged_in.post("/orders", json={**VALID, "client_order_id": n}).json()["seq"]
+        logged_in.post(
+            "/orders",
+            json={**VALID, "client_order_id": n, "price_ticks": 100_000, "qty": 1},
+        ).json()["seq"]
         for n in range(1, 6)
     ]
     keys = [tuple(int(part) for part in s.split("-")) for s in seqs]
@@ -82,6 +85,16 @@ def test_an_order_without_a_session_is_401(client: TestClient):
     assert client.post("/orders", json=VALID).status_code == 401
 
 
+def test_order_exceeding_available_cash_is_rejected(logged_in: TestClient):
+    """Risk checks must happen before the gateway appends to the stream."""
+    body = {**VALID, "client_order_id": 999, "qty": 200_000, "price_ticks": 6_412_500}
+    response = logged_in.post("/orders", json=body)
+    assert response.status_code == 409, response.text
+    payload = response.json()
+    assert payload["detail"]["status"] == "rejected"
+    assert payload["detail"]["reason"] == "INSUFFICIENT_CASH"
+
+
 def test_authentication_is_checked_before_the_body(client: TestClient):
     """A malformed order from a stranger must not reveal that it was malformed."""
     assert client.post("/orders", json={"nonsense": True}).status_code == 401
@@ -108,3 +121,105 @@ def test_the_gateway_no_longer_judges_whether_an_order_exists(logged_in: TestCli
     response = logged_in.request("DELETE", "/orders/424242", json={"client_order_id": 99})
     assert response.status_code == 202
     assert response.json()["status"] == "accepted"
+
+
+# --- idempotency -------------------------------------------------------------------------------
+
+
+def test_same_client_order_id_twice_produces_one_order(logged_in: TestClient):
+    """Task 3.2 Success Criterion 1. Submitting the same order twice with the same
+    client_order_id should return the same order_id (null) and seq from the first submission."""
+    order = {**VALID, "client_order_id": 2001}
+    
+    # First submission
+    response1 = logged_in.post("/orders", json=order)
+    assert response1.status_code == 202
+    body1 = response1.json()
+    assert body1["status"] == "accepted"
+    seq1 = body1["seq"]
+    
+    # Retry with same client_order_id
+    response2 = logged_in.post("/orders", json=order)
+    assert response2.status_code == 202
+    body2 = response2.json()
+    assert body2["status"] == "accepted"
+    
+    # Should return the same seq (idempotent)
+    assert body2["seq"] == seq1
+    assert body2["client_order_id"] == order["client_order_id"]
+    assert body2["order_id"] is None
+
+
+def test_retry_after_rejection_returns_same_rejection(logged_in: TestClient):
+    """Task 3.2 Success Criterion 2. If a submission was rejected, a retry with the same
+    client_order_id should return the same rejection reason."""
+    order = {**VALID, "client_order_id": 2002, "qty": 200_000, "price_ticks": 6_412_500}
+    
+    # First submission (invalid order, insufficient cash)
+    response1 = logged_in.post("/orders", json=order)
+    assert response1.status_code == 409
+    body1 = response1.json()
+    assert body1["detail"]["status"] == "rejected"
+    reason1 = body1["detail"]["reason"]
+    
+    # Retry with same client_order_id
+    response2 = logged_in.post("/orders", json=order)
+    assert response2.status_code == 409
+    body2 = response2.json()
+    assert body2["detail"]["status"] == "rejected"
+    
+    # Should return the same rejection reason (idempotent)
+    assert body2["detail"]["reason"] == reason1
+
+
+def test_reserved_cash_does_not_leak_on_retry(logged_in: TestClient):
+    """Task 3.2 Success Criterion 3. Reserved cash for an order should not be double-counted
+    when the client retries a submission. Verify by checking that we can still submit a large
+    order after retrying a valid order."""
+    # First order (should succeed and reserve 300,000 ticks)
+    order1 = {**VALID, "client_order_id": 2003}
+    response1 = logged_in.post("/orders", json=order1)
+    assert response1.status_code == 202
+    
+    # Retry the same order (idempotent, should not double-reserve)
+    response1b = logged_in.post("/orders", json=order1)
+    assert response1b.status_code == 202
+    
+    # Second order with the remaining cash (1M - 300k = 700k)
+    # This should succeed if the retry didn't double-reserve
+    order2 = {**VALID, "client_order_id": 2004, "price_ticks": 100_000, "qty": 4}
+    response2 = logged_in.post("/orders", json=order2)
+    assert response2.status_code == 202, "Should succeed: 400k <= 700k remaining cash"
+    
+    # A third order that would exceed remaining cash should still fail
+    order3 = {**VALID, "client_order_id": 2005, "price_ticks": 100_000, "qty": 4}
+    response3 = logged_in.post("/orders", json=order3)
+    assert response3.status_code == 409, "Should fail: 400k + 400k > 700k remaining"
+    assert response3.json()["detail"]["reason"] == "INSUFFICIENT_CASH"
+
+
+def test_cancel_retry_returns_same_seq(logged_in: TestClient):
+    """Task 3.2 cancel idempotency. Retrying a cancel with the same client_order_id should
+    return the same seq from the first cancel."""
+    # Submit an order first
+    order = {**VALID, "client_order_id": 2010}
+    logged_in.post("/orders", json=order)
+    
+    # Cancel the order
+    cancel_req = {"client_order_id": 3010}
+    response1 = logged_in.request(
+        "DELETE", f"/orders/{VALID['client_order_id']}", json=cancel_req
+    )
+    assert response1.status_code == 202
+    body1 = response1.json()
+    seq1 = body1["seq"]
+    
+    # Retry the same cancel (same client_order_id)
+    response2 = logged_in.request(
+        "DELETE", f"/orders/{VALID['client_order_id']}", json=cancel_req
+    )
+    assert response2.status_code == 202
+    body2 = response2.json()
+    
+    # Should return the same seq (idempotent)
+    assert body2["seq"] == seq1
