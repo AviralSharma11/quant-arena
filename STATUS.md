@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `44035c8` · **Week 3** (11–17 Sep) — Task 3.1 complete
-**State:** 325 standalone tests pass (all suites green). 3.1 risk checks verified and merged.
+**Last updated:** 2026-09-01 · **HEAD** `85e46d0` · **Week 3** (11–17 Sep) — Task 3.2 complete
+**State:** 28 order tests pass (all suites green). 3.2 idempotency with Lua atomic claim verified and merged.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -11,14 +11,15 @@
 
 ## NOW
 
-**Task 3.2 · Idempotency — atomic claim-and-append** — Dev B, week 3
+**Task 3.3 · Public deployment and CI** — Dev B, week 3
 
-- **Step:** require `client_order_id` on every submission · write Lua script for atomic
-  claim-and-append · implement validate → reserve → claim-and-append ordering.
-- **Files:** `services/gateway/routes_orders.py`, `services/gateway/idempotency.py` (new).
-- **Done when:** same `client_order_id` twice produces one order; second returns stored outcome ·
-  no reservation leak on retry · duplicate submission with rejection returns identical answer.
-  (`WEEKLY_PLAN.md` task 3.2, Success Criteria 1–4.)
+- **Step:** decide deployment target (single VM or managed platform) · publish container images ·
+  deploy with TLS and domain · set up per-commit GitHub Actions suite (hand-written ,
+  determinism tests, unit tests, target <2 min) · add nightly stub.
+- **Files:** `Dockerfile`, `docker-compose.yml`, GitHub Actions workflows, deployment config.
+- **Done when:** application reachable over HTTPS · push runs fixed suite and blocks merge on
+  failure · redeployment is a single documented command · per-commit suite completes in under
+  two minutes. (`WEEKLY_PLAN.md` task 3.3, Success Criteria 1–4.)
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
@@ -58,7 +59,7 @@ means something is wrong with the plan, not with the week.*
 | 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
 | 3.1  Risk checks + in-memory reservations | B | 3 | done | `44035c8` · 24 gateway order tests pass · available_cash check and reservation verified |
-| 3.2  Idempotency — atomic claim-and-append | B | 3 | todo | **unblocks Dev A 6.4** |
+| 3.2  Idempotency — atomic claim-and-append | B | 3 | done | `85e46d0` · 28 tests pass · Lua atomic claim + order & cancel idempotency verified · **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | deployment target decided here |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |
 | 4.4  Bots — market maker and noise traders | B | 4 | todo | — |
