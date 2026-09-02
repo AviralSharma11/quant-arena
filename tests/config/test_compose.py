@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SERVICES = ("redis", "postgres", "gateway")
+SERVICES = ("redis", "postgres", "gateway", "matcher")
 
 #: Environment keys the gateway container is allowed to receive. Everything else belongs in
 #: config/quant_arena.toml — see the boundary in Task 1.4.
@@ -37,7 +37,7 @@ def compose() -> dict:
     return json.loads(result.stdout)
 
 
-def test_the_stack_is_redis_postgres_and_the_gateway(compose: dict):
+def test_the_stack_is_redis_postgres_the_gateway_and_the_matcher(compose: dict):
     assert set(compose["services"]) == set(SERVICES)
 
 
@@ -95,3 +95,13 @@ def test_the_image_does_not_buffer_stdout():
 
 def test_the_image_does_not_run_as_root():
     assert "USER quant" in (REPO_ROOT / "Dockerfile").read_text()
+
+
+def test_the_matcher_is_its_own_process_and_never_reaches_postgresql(compose: dict):
+    """Open Issue 007: matching is a single-writer loop with no request attached to it, so it
+    does not live inside the gateway. And the engine is money-blind (Open Issue 001) — the read
+    model belongs to the ledger, so the matcher is given no database URL at all."""
+    matcher = compose["services"]["matcher"]
+    assert matcher["command"] == ["python", "-m", "services.matcher"]
+    assert set(matcher["environment"]) == {"QA_REDIS_URL"}
+    assert set(matcher["depends_on"]) == {"redis"}
