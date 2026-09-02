@@ -1,4 +1,5 @@
-# The gateway image. One stage: the dependency set is small and there is nothing to compile,
+# The Python service image, shared by the gateway and the matcher — they differ only in their
+# command, and one image means they cannot drift onto different dependency sets. One stage: the dependency set is small and there is nothing to compile,
 # so a builder stage would add moving parts without saving meaningful size.
 FROM python:3.13-slim
 
@@ -20,6 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY config/ ./config/
 COPY contracts/ ./contracts/
+# Dev A's naive model. The matcher process wraps it (services/matcher), which is the
+# end-of-week-2 integration point; the gateway itself never imports it.
+COPY engine/ ./engine/
 COPY services/ ./services/
 
 USER quant

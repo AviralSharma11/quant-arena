@@ -1,7 +1,9 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-08-31 · **HEAD** `bd321b3` · **Week 2** (4–10 Sep) — started 3 days early
-**State:** **Week 2 Dev B work complete** on branch `week-2-durable-event-flow`. 302 standalone tests pass (all suites green).
+**Last updated:** 2026-09-02 · **HEAD** `8210d3a` · **Week 2 closed** — integration point 1 passed
+**State:** Stub engine swapped for the naive model over the real stream, on branch
+`engine-integration`. 398 tests pass, 1 skipped (C++ binary absent). Dev B's 3.1 and 3.2 live
+on `week-3-Risk-Management` and are **not** on this branch — the two lines have not been merged.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -11,15 +13,12 @@
 
 ## NOW
 
-**Task 3.1 · Risk checks and in-memory reservations** — Dev B, week 3
+**Merge `week-3-Risk-Management` into `engine-integration`** — Dev B
 
-- **Step:** maintain settled cash/positions and open reservations in gateway process memory,
-  check `available_cash >= order_cost` before stream append, release reservations on fill/cancel.
-- **Files:** `services/gateway/risk.py`, `services/gateway/routes_orders.py`, `tests/gateway/`.
-- **Done when:** order exceeding available cash is rejected with 409 INSUFFICIENT_CASH · partial
-  fills release difference · cancels release on confirmed event.
-  (`WEEKLY_PLAN.md` task 3.1, Success Criteria 1–4.)
-- **Not in this step:** no database round trip on hot path · reservations stay in process memory.
+- **Step:** the risk and idempotency work and the engine integration are on two branches that
+  have never met. `git merge-tree` reports no conflict; the files are disjoint.
+- **Done when:** both lines are in one tree and the combined suite is green.
+- **Then:** Task 3.3, public deployment and CI.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
@@ -30,9 +29,11 @@
 
 ## Blocked / waiting
 
-- **On Dev A:** nothing.
-  *(End of week 2 is the first integration point: the stub engine is swapped for the real
-  stream and Dev A's naive model consumes it. Appendix D.2.)*
+- **On Dev A:** `naive_model.match()` prints the taker's price when the seller aggresses; the
+  frozen schema requires the resting (maker) price. Reported, not fixed — Dev A's file. Task
+  4.1's differential tests will disagree here until it lands.
+  *(Integration point 1 is passed. The next is end of week 5: the C++ engine process replaces
+  the naive model. Appendix D.2.)*
 - **On a decision from me:** nothing.
 - **On something external:** nothing.
 
@@ -53,13 +54,14 @@ means something is wrong with the plan, not with the week.*
 | 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
 | 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
 | 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
-| 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
+| 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | merged to main as `e4352c1`; not reported by Dev A |
+| INT1 Stub engine → naive model over the stream | B | 2 | done | `8210d3a` · 21 matcher tests · live restart replayed 26, appended 0 |
 | 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
 | 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
 | 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
-| 3.1  Risk checks + in-memory reservations | B | 3 | wip | — |
-| 3.2  Idempotency — atomic claim-and-append | B | 3 | todo | **unblocks Dev A 6.4** |
+| 3.1  Risk checks + in-memory reservations | B | 3 | done | `c6d20c1` on `week-3-Risk-Management` — **not on this branch** |
+| 3.2  Idempotency — atomic claim-and-append | B | 3 | done | `85e46d0` on `week-3-Risk-Management` — **not on this branch** · unblocks Dev A 6.4 |
 | 3.3  Public deployment and CI | B | 3 | todo | deployment target decided here |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |
 | 4.4  Bots — market maker and noise traders | B | 4 | todo | — |
@@ -139,6 +141,11 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-08-31 | `react-router-dom` added to the closed stack list | React ships no router and the three screens need one; the ~40-line hand-rolled alternative was weighed and rejected because 5.4b also needs a protected-route wrapper | **amends `CLAUDE.md` and OI 019** — applied in `3df522c` |
 | 2026-08-31 | No JavaScript test framework | Node 24 strips TypeScript natively, so the route table is inspected and the built app served from the existing pytest suite. Keeps the closed list one dependency wider, not three | — |
 | 2026-08-31 | Frontend stays out of `docker-compose.yml` | 1.4 is closed and deployment is 3.3's. The Vite dev server runs on the host against the containerised gateway | — |
+| 2026-09-02 | Recovery counts **anchors** — one outbound record per inbound record — instead of a checkpoint | A replay that re-appended its outbound records would duplicate fills that moved real positions. No snapshot (OI 018 §13.1) and no field added to a frozen schema | implements OI 018 §13.1 |
+| 2026-09-02 | The matcher holds **one book per `symbol_id`** | `naive_model.OrderBook.match()` crosses on price alone; a single book would trade symbol 3 against symbol 7 | — |
+| 2026-09-02 | The adapter emits the **maker's** price, discarding `naive_model`'s | `schema.toml` says `Fill.price_ticks` is always the resting price, and contracts v1 is frozen | flags a defect in Dev A's 1.2 |
+| 2026-09-02 | `StubEngine`, `engine_port.py` and the `Engine` dependency deleted | The seam CLAUDE.md asked to keep behind a thin interface is now the stream itself | closes the one load-bearing stub, Appendix D.2 |
+| 2026-09-02 | One image for gateway and matcher; `engine/` un-ignored in `.dockerignore` | They differ only in their command, so one image means they cannot drift onto different dependency sets. `engine/cpp` stays excluded — nothing in the image compiles it | — |
 
 ## Deviations from the plan
 
@@ -161,7 +168,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest -q               # 331 tests, against the compose stores
+.venv/bin/python -m pytest -q               # 398 tests, against the compose stores
+docker compose logs matcher                 # the replay count on every restart
 
 cd web && npm install && npm run dev        # frontend at localhost:5173, proxied to the gateway
 ```
@@ -170,7 +178,10 @@ that skip has not verified 1.1's Success Criterion 3.
 
 ## Open questions
 
-*(none)*
+- **`LedgerConsumer` is never run by any process**, so `/portfolio` does not move after a fill in
+  the deployed stack. Wiring it in requires registration to append `CreateAccount` to the stream
+  rather than writing the `accounts` row directly — which would break a passing criterion of
+  finished Task 1.3 (`tests/gateway/test_auth.py:35`). Needs a decision.
 
 ## Archive
 
@@ -179,3 +190,6 @@ that skip has not verified 1.1's Success Criterion 3.
 - **Week 1 (28 Aug – 3 Sep) — closed 31 Aug, 3 days early.** 1.1 contracts frozen and merged ·
   1.3 gateway skeleton · 1.4 Docker stack and shared config · 5.4a frontend scaffold. All Dev B
   and joint criteria passed with named tests; 331 tests green. Dev A's 1.2 and 2.3 not reported.
+- **Week 2 (4–10 Sep) — closed 2 Sep.** 2.1 streams and durability · 2.2 ledger and replay ·
+  5.4b auth screens · integration point 1: the stub engine swapped for Dev A's naive model over
+  the real stream. 398 tests green.

@@ -23,9 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from config.settings import Settings
 from config.settings import settings as default_settings
 from config.startup import log_startup
-from services.engine_stub import StubEngine
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
-from services.gateway.engine_port import EnginePort
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
 from services.gateway.sessions import SessionStore
@@ -39,9 +37,7 @@ from services.gateway.streams import (
 )
 
 
-def create_app(
-    settings: Settings | None = None, engine: EnginePort | None = None
-) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or default_settings
 
     @asynccontextmanager
@@ -62,11 +58,6 @@ def create_app(
         app.state.db_sessionmaker = async_sessionmaker(
             db, class_=AsyncSession, expire_on_commit=False
         )
-        # Retained until the end-of-week-2 integration point removes it (Appendix D.2). No
-        # longer on the order path — the gateway XADDs to the stream instead, and Dev A's
-        # naive model consumes it.
-        app.state.engine = engine or StubEngine()
-
         app.state.halt = HaltState()
         app.state.streams = StreamProducer(
             stream_redis,

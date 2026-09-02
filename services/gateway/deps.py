@@ -13,7 +13,6 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config.settings import Settings
-from services.gateway.engine_port import EnginePort
 from services.gateway.sessions import SessionStore
 from services.gateway.streams import HaltState, StreamProducer
 
@@ -24,10 +23,6 @@ def get_settings(request: Request) -> Settings:
 
 def get_sessions(request: Request) -> SessionStore:
     return request.app.state.sessions
-
-
-def get_engine(request: Request) -> EnginePort:
-    return request.app.state.engine
 
 
 def get_streams(request: Request) -> StreamProducer:
@@ -60,7 +55,6 @@ async def current_user_id(
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 Sessions = Annotated[SessionStore, Depends(get_sessions)]
 Config = Annotated[Settings, Depends(get_settings)]
-Engine = Annotated[EnginePort, Depends(get_engine)]
 CurrentUser = Annotated[int, Depends(current_user_id)]
 Streams = Annotated[StreamProducer, Depends(get_streams)]
 Halt = Annotated[HaltState, Depends(get_halt)]

@@ -15,8 +15,9 @@ Deliberately absent, each a later task rather than an oversight:
 - **No risk checks or reservations.** Nobody's cash is consulted — Task 3.1.
 - **No symbol existence check.** `symbol_id` is range-checked but not looked up; the symbol
   registry arrives with Task 5.1. `RejectReason.UNKNOWN_SYMBOL` already exists for it.
-- **Nothing consumes the inbound stream yet.** Dev A's naive model connects at the
-  end-of-week-2 integration point (Appendix D.2).
+
+The inbound stream is consumed by `services/matcher`, which wraps Dev A's naive model — the
+end-of-week-2 integration point (Appendix D.2). The stub engine is gone.
 """
 
 from __future__ import annotations
