@@ -1,10 +1,11 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-02 · **HEAD** `fb2cd8a` · **Week 3** (11–17 Sep) — running 9 days early
-**State:** Everything through 3.2 is on `engine-integration`: the stub engine swapped for the
-naive model over the real stream, then week 3 merged in and audited. **416 tests pass**, 1
-skipped (C++ binary absent). The audit found four defects in 3.1/3.2; all four are fixed in
-`fb2cd8a`. `week-3-Risk-Management` is left at `eb9d653` and is not maintained further.
+**Last updated:** 2026-09-04 · **HEAD** `78ed4dc` · **Week 5** (25 Sep – 1 Oct) — running well ahead
+**State:** Weeks 3 and 4 closed. **565 tests pass**, 3 skipped (Dev A's C++ binary absent; two
+bot obligation tests skipped by their own outage guard). Week 4 is seven commits on
+`task/4.0-week4-prework`, **not yet pushed** — the whole week goes up as one pull request.
+A live market runs: `docker compose --profile bots up` gives quoting market makers, noise
+traders, and fan-out deriving books from the stream.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -14,36 +15,45 @@ skipped (C++ binary absent). The audit found four defects in 3.1/3.2; all four a
 
 ## NOW
 
-**Task 3.3 · Public deployment and CI** — Dev B, week 3
+**Task 5.2b · Fan-out completes** — Dev B, week 5 · *unblocks Dev A's 6.3*
 
-- **Step:** decide the deployment target · publish container images · deploy with TLS and a
-  domain · per-commit GitHub Actions suite · nightly stub.
-- **Files:** `Dockerfile`, `docker-compose.yml`, `.github/workflows/`, deployment config.
-- **Done when:** reachable over HTTPS · a push runs the suite and blocks merge on failure ·
-  redeploy is one documented command · the per-commit suite finishes under two minutes.
-  (`WEEKLY_PLAN.md` task 3.3, Success Criteria 1–4.)
-- **Carry into it:** the session cookie's `Secure` flag is off for the local http stack and
-  must go back on behind TLS. The matcher is now a compose service and needs deploying too.
+- **Step:** WebSocket server on `/stream` · subscription filtering · the 20 Hz conflation tick ·
+  serialise once per symbol per tick · the private per-user stream with sequence numbers ·
+  the slow-client policy.
+- **Files:** `services/fanout/` (state and message builders exist from 5.2a), a compose service.
+- **Done when:** 200+ concurrent clients without ack latency degrading measurably · a slowed
+  client gets a lower frame rate and affects no other · reconnect recovers the full book from
+  the next snapshot · a private-stream gap is detectable from its sequence numbers ·
+  serialisation happens once per symbol per tick, verified by instrumentation.
+  (`WEEKLY_PLAN.md` task 5.2, Success Criteria 1–5 — **all five land here**; 5.2a could meet
+  none of them, which is why it carries its own definition of done in `services/fanout/README.md`.)
+- **Carry into it:** three contract questions for Dev A, below. `web/src/stream/session.ts` has
+  one flag, `USE_MOCK_STREAM`, which is the only call site that changes when this lands.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **4.4** Bots — market maker and noise traders (Dev B, wk 4)
-2. **5.2a** Fan-out process begins (Dev B, wk 4)
-3. **5.4c** WebSocket client, gap detection, rAF loop (Dev B, wk 4)
+1. **5.1** Crypto fair value, replay clock, ten symbols (Dev B, wk 5)
+2. **6.1a** Trading screen begins (Dev B, wk 5)
+3. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
 
 ## Blocked / waiting
 
 - **On Dev A:** `naive_model.match()` prints the taker's price when the seller aggresses; the
   frozen schema requires the resting (maker) price. Reported, not fixed — Dev A's file. Task
   4.1's differential tests will disagree here until it lands.
+  Also **three contract clarifications**, best sent as one message, all needed before 5.2b:
+  (a) does a `bars:*` message carry `seq`? §3.5 says all do; the §3.3 example omits it.
+  (b) on `private`, is `seq` the dense per-user counter or the stream id? Read as the latter,
+  no private gap is detectable and 5.2's fourth criterion cannot be met.
+  (c) will the C++ engine emit `BookChanged`? Nothing does today; fan-out derives the book.
   *(Integration point 1 is passed. The next is end of week 5: the C++ engine process replaces
   the naive model. Appendix D.2.)*
-- **On a decision from me:** whether registration should append `CreateAccount` to the stream
-  so the ledger can run as a process — see Open questions. Until it is settled, `/portfolio`
-  does not move after a fill in the deployed stack.
-- **On something external:** nothing.
+- **On a decision from me:** nothing.
+- **On something external:** 35 duplicate `" 2"` files in the working tree — an iCloud sync
+  conflict, not a code problem. Untracked and never committed, but they double-collect the
+  contracts tests (801 reported instead of 568). Delete them and add a `.gitignore` rule.
 
 *Empty is the normal state. Dev B has almost no cross-developer dependencies. A long list here
 means something is wrong with the plan, not with the week.*
@@ -68,13 +78,13 @@ means something is wrong with the plan, not with the week.*
 | 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
 | 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
-| 3.1  Risk checks + in-memory reservations | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 5 of 6 criteria verified; criterion 3 unverified, see Deviations |
+| 3.1  Risk checks + in-memory reservations | B | 3 | done | `6c67e01` · sells reserve inventory not cash; `INSUFFICIENT_POSITION` now raised · 5 of 6 criteria; criterion 3 unverified, see Deviations |
 | 3.2  Idempotency — atomic claim-and-append | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 6 of 6 criteria · concurrent burst now yields exactly one order · **unblocks Dev A 6.4** |
-| 3.3  Public deployment and CI | B | 3 | todo | deployment target decided here |
+| 3.3  Public deployment and CI | B | 3 | todo | **half merged** `5efe462` — CI gate, nightly, multi-arch images. Criteria 1 and 3 (HTTPS, one-command redeploy) outstanding; see Deviations |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |
-| 4.4  Bots — market maker and noise traders | B | 4 | todo | — |
-| 5.2a Fan-out process begins | B | 4 | todo | depends 2.1, **not** 4.2 |
-| 5.4c WS client, gap detection, rAF loop | B | 4 | todo | mock WS server until 5.2b |
+| 4.4  Bots — market maker and noise traders | B | 4 | done | `68c7821` · 43 tests · live: 130 fills in 45s, both makers meeting their uptime obligation, units conserved at 0 per symbol |
+| 5.2a Fan-out process begins | B | 4 | done | `0eb5329` · 38 tests · derived book matches the matcher order-for-order across a 400-record sequence; live 706 records recovered |
+| 5.4c WS client, gap detection, rAF loop | B | 4 | done | `78ed4dc` · 26 tests · reconnect re-subscribes, a deliberate private gap triggers exactly one resync; criterion 5 mechanism-verified, profiler check manual |
 | 4.2  Engine process, Redis, replay recovery | A | 5 | A:unknown | — |
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
@@ -102,31 +112,25 @@ means something is wrong with the plan, not with the week.*
 
 ---
 
-## This week — week 3 (11–17 Sep)
+## This week — week 5 (25 Sep – 1 Oct)
 
 Dev B's tasks with their Success Criteria as a live checklist. Deleted when the week closes.
 
-**3.1 Risk checks and in-memory reservations**
-- [x] Two rapid orders that together exceed the balance — the second is rejected
-- [x] A buy filling better than its limit releases the difference *(was leaking exactly the
-      price improvement; fixed `fb2cd8a`)*
-- [ ] A cancel that loses the race to a fill releases nothing — **not verified**, needs a
-      deterministic harness
-- [x] Restarting the gateway rebuilds reservations and balances identically by replay
-      *(was forgetting every reservation; fixed `fb2cd8a`)*
-- [x] No user's available balance ever goes negative
-- [x] A market order into a thin book cannot execute outside its band *(was not built at all)*
+**5.2b Fan-out completes** — *unblocks Dev A 6.3*
+- [ ] 200+ concurrent clients receive updates without ack latency degrading measurably
+- [ ] A deliberately slowed client gets a lower frame rate and demonstrably affects no other
+- [ ] Disconnect and reconnect recovers the full book from the next snapshot, no special handling
+- [ ] A gap in the private stream is detectable from its sequence numbers
+- [ ] Serialisation happens once per symbol per tick, verified by instrumentation
 
-**3.2 Idempotency — atomic claim-and-append** — *unblocks Dev A 6.4*
-- [x] The same `client_order_id` twice produces exactly one order — sequentially **and**
-      concurrently *(8 concurrent retries produced 5 orders; fixed `fb2cd8a`)*
-- [x] A retry while the original is in flight returns `202 in_progress`
-- [x] A retry after a rejection returns the identical rejection and reason
-- [x] A duplicate submission leaves `reserved` unchanged
-- [x] A submission without a key is rejected `400` before any other processing
-- [x] Claim and append are atomic, so the gap between them cannot be observed
+**5.1 Crypto fair value, replay clock, ten symbols**
+- [ ] Ten symbols show distinct, realistically moving prices
+- [ ] The replay ratio appears in configuration and in the stream
+- [ ] The system runs fully offline from pinned data
+- [ ] The fallback generator produces a deterministic path with no data file present
+- [ ] The README states that price paths derive from anonymised historical data
 
-**3.3 Public deployment and CI** — see NOW.
+**6.1a Trading screen begins** — no criteria of its own; 6.1b carries them.
 
 ---
 
@@ -163,6 +167,13 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-02 | A reservation is released at the **limit** price, never the fill price | It was taken at the limit, so releasing at the fill strands the price improvement for the life of the process | implements 3.1 criterion 2 |
 | 2026-09-02 | Market-order band is `limits.market_order_band_bps`, 500 bps | 3.1 names `best_ask × 1.05`. It is the only thing between a market order and a thin book, so it is configuration, not a constant. Per-symbol bands belong with the symbol table in 5.1 | — |
 | 2026-09-02 | Top of book is **derived** from the resting orders the gateway already tracks | The gateway records every `OrderAccepted` for reservation accounting anyway, so a band needs a query, not a second book to keep in step | — |
+| 2026-09-04 | Registration appends `CreateAccount` to the stream; the response carries no `cash_ticks` | Writing the `accounts` row directly made PostgreSQL the source of truth for a balance, and left `LedgerConsumer` unable to run — it rebuilds accounts by replay, and a stream without the grant replays every balance to zero | implements OI 004; amends 1.3's criterion, see Deviations |
+| 2026-09-04 | Rate limiting runs **ahead of** the idempotency claim | A 429 after the claim answers that `client_order_id` "rejected" for the whole TTL, so the client's correct retry keeps getting the refusal — a transient limit turned into a permanently dead order id | implements OI 015 §11.1 |
+| 2026-09-04 | Designated market makers are an explicit **list of usernames** in `bots.designated_market_maker_accounts` | A prefix rule like `dmm_*` would let anyone register into the exemption. Config is version controlled and hashed, so the grant is auditable | implements OI 005 §10.6 |
+| 2026-09-04 | `[symbols]` holds provisional QAA/QAB, and `GET /symbols` serves them | 4.4's bots need something to quote and 5.4c cannot resolve a `symbol_id` without it. Names deliberately meaningless — a placeholder reading like a real ticker is the one that survives into the demo | 5.1 replaces the block wholesale |
+| 2026-09-04 | A bot's `client_order_id` starts from a **millisecond timestamp**, never 1 | A counter restarting at 1 re-sent keys the idempotency store had already answered: every order acknowledged, none appended, the market dead while every participant reported success | — |
+| 2026-09-04 | `seq` means different things per channel: gap detection is **private-only** | On market data `seq` is the stream id and the channel carries only some of the stream's records, so a jump is normal. Book gaps are self-healing anyway (§3.5). Only the private counter is dense | pending Dev A, see Blocked |
+| 2026-09-04 | Bots run behind a compose **profile**; fan-out gets no compose service until 5.2b | A stack that always has a live market is wanted for a demo and unwanted under a test suite. A container serving nobody is a container doing nothing observable | — |
 | 2026-09-04 | Fan-out **derives** the book from OrderAccepted/Fill/OrderCancelled rather than from `BookChanged` | Nothing emits `BookChanged`; making the matcher emit it would require the same of Dev A's C++ engine in week 5, creating the same-week cross-developer dependency D.4 forbids. Derived is also engine-agnostic, so the week-5 swap does not touch fan-out | `services/fanout/README.md` §1 |
 | 2026-09-04 | Fan-out keeps its **own** `Book` rather than sharing a resting-order projection | risk.py, ledger.py and matcher/adapter.py already each rebuild resting orders; four shapes differ enough that one abstraction serving all would be worse. Duplication chosen with open eyes — revisit at a fifth consumer, or at the first disagreement | `services/fanout/README.md` §2 |
 | 2026-09-04 | Price levels are **aggregated on read**, not maintained | A maintained map is a second structure that can drift from the first; summing cannot. First file to open when fan-out is measured as the bottleneck | `services/fanout/README.md` §3 |
@@ -182,6 +193,20 @@ decisions: a schedule deviation is not a design change.
 - **Tasks 3.1 and 3.2 were marked `done` on their branch while four success criteria failed.**
   Found by an audit on 2 Sep and fixed the same day. The lesson is in the checklist above:
   a criterion is verified by exercising it, not by the task's own unit tests passing.
+- **3.3 was split.** CI, the nightly stub and multi-arch images merged as `5efe462`; the
+  deployment half (HTTPS, one-command redeploy) was deferred out of week 3 by decision and is
+  now carried behind week 5. Criteria 2 and 4 pass; 1 and 3 are untouched.
+- **Two further defects in finished Task 3.1**, found in week 4 by running it rather than
+  reading it: a sell reserved cash it never released (two sells of half the grant exhausted an
+  account that had spent nothing), and nothing checked the position at all, so every account
+  could short. Same lesson as the week-3 audit, one week later.
+- **`RiskState.watch_stream` died on the first Redis error** — the one long-running loop in the
+  system with no exception handling. `/health` recovered while the gateway stayed permanently
+  blind to the stream. Task 2.1's fifth criterion passed while the property behind it did not.
+- **5.4c's Success Criterion 5 is mechanism-verified, not profiler-verified.** "No React
+  re-render, verifiable in the React profiler" needs a human at a browser, and there is no JS
+  test framework by decision. What is proven: the buffer cannot notify, the modules cannot
+  reach React, and 1,000 messages between two frames produce exactly one paint.
 
 ## How to run it right now
 
@@ -195,8 +220,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest -q               # 416 tests, against the compose stores
-docker compose logs matcher                 # the replay count on every restart
+.venv/bin/python -m pytest -q               # 565 tests, against the compose stores
+QA_BOT_PASSWORD=... docker compose --profile bots up -d   # a live market: makers + noise
 
 cd web && npm install && npm run dev        # frontend at localhost:5173, proxied to the gateway
 ```
@@ -205,10 +230,7 @@ that skip has not verified 1.1's Success Criterion 3.
 
 ## Open questions
 
-- **`LedgerConsumer` is never run by any process**, so `/portfolio` does not move after a fill in
-  the deployed stack. Wiring it in requires registration to append `CreateAccount` to the stream
-  rather than writing the `accounts` row directly — which would break a passing criterion of
-  finished Task 1.3 (`tests/gateway/test_auth.py:35`). Needs a decision.
+*(none — the ledger now runs as its own compose service; see the decision log)*
 
 ## Archive
 
@@ -220,3 +242,9 @@ that skip has not verified 1.1's Success Criterion 3.
 - **Week 2 (4–10 Sep) — closed 2 Sep.** 2.1 streams and durability · 2.2 ledger and replay ·
   5.4b auth screens · integration point 1: the stub engine swapped for Dev A's naive model over
   the real stream. 398 tests green.
+- **Week 3 (11–17 Sep) — closed 4 Sep.** 3.1 risk and reservations · 3.2 idempotency with an
+  atomic Lua claim · 3.3 CI, nightly and multi-arch images (deployment half deferred). Four
+  defects found by audit and two more by running it; all fixed.
+- **Week 4 (18–24 Sep) — closed 4 Sep.** Pre-work: symbol registry, rate limiting, and a ledger
+  that finally runs · designated market makers · 4.4 bots · 5.2a fan-out begins · 5.4c
+  WebSocket client and rAF loop. 565 tests green. Seven commits, unpushed.
