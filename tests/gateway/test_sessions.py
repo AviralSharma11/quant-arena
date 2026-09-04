@@ -24,12 +24,15 @@ def _login(client: TestClient, username: str = "trader_one",
 
 
 def _authenticated_probe(client: TestClient):
-    """Any endpoint behind the session. POST /orders leaves no state we care about here."""
-    return client.post(
-        "/orders",
-        json={"client_order_id": 1, "symbol_id": 1, "side": 1, "tif": 1,
-              "price_ticks": 100, "qty": 1},
-    )
+    """Any endpoint behind the session, and deliberately one that needs nothing else.
+
+    `POST /orders` was the probe until week 4, when the cash grant became an event: an order
+    now needs a matcher to have forwarded `CreateAccount` before the account has any cash, and
+    this test would have been asserting the funding path rather than the session. `GET
+    /portfolio` is behind the same session dependency and answers `401` without it, which is
+    the only thing being tested here.
+    """
+    return client.get("/portfolio")
 
 
 # --- the restart test ------------------------------------------------------------------------
@@ -45,14 +48,14 @@ def test_session_survives_a_new_app_instance(settings: Settings):
     """
     with TestClient(create_app(settings)) as first:
         cookie = _login(first)
-        assert _authenticated_probe(first).status_code == 202
+        assert _authenticated_probe(first).status_code == 200
 
     # First gateway is gone. Now a brand-new one, as if the process had been restarted.
     with TestClient(create_app(settings)) as second:
         second.cookies.set("qa_session", cookie)
         response = _authenticated_probe(second)
 
-    assert response.status_code == 202, (
+    assert response.status_code == 200, (
         "the session did not survive the restart — it is being held in process memory, "
         f"not in Redis (got {response.status_code})"
     )

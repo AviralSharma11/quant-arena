@@ -10,6 +10,7 @@ so a future refactor of `RiskState` cannot quietly make them vacuous.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,6 +37,22 @@ def _order(coid: int, *, price: int, qty: int, side: int = BUY, symbol: int = 1)
         "price_ticks": price,
         "qty": qty,
     }
+
+
+def _await_grant(client: TestClient, settings: Settings, timeout: float = 5.0) -> None:
+    """Block until the gateway's own watcher has applied the grant.
+
+    Deliberately waits on the real asynchronous path instead of writing `settled_cash`
+    directly — the point of the change is that the balance arrives from the stream, and a test
+    that set it by hand would prove the opposite.
+    """
+    risk = client.app.state.risk
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any(v == settings.initial_cash_ticks for v in risk.settled_cash.values()):
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"the grant never reached the risk state: {risk.settled_cash}")
 
 
 def _run_matcher(settings: Settings) -> None:
@@ -183,6 +200,12 @@ def test_a_restarted_gateway_still_refuses_an_order_it_has_no_cash_for(
     assert client.post("/auth/register", json=body).status_code == 201
     assert client.post("/auth/login", json=body).status_code == 200
 
+    # From week 4 the grant is a `CreateAccount` on the inbound stream rather than a row the
+    # gateway wrote, so the account has no cash until the matcher has forwarded it and the
+    # gateway's watcher has read the `AccountCreated` back off the outbound stream.
+    _run_matcher(settings)
+    _await_grant(client, settings)
+
     grant = settings.initial_cash_ticks
     assert client.post("/orders", json=_order(1, price=grant - 1_000, qty=1)).status_code == 202
     # Only 1,000 ticks are left uncommitted.
@@ -264,7 +287,10 @@ def test_a_market_order_into_an_empty_book_has_no_price_and_is_refused(logged_in
         "/orders",
         json={
             "client_order_id": 77,
-            "symbol_id": 3,
+            # A *listed* symbol with an empty book. Symbol 3 was used here until week 4, when
+            # the gateway gained a registry and began rejecting it as UNKNOWN_SYMBOL — which
+            # would have passed this test for entirely the wrong reason.
+            "symbol_id": 2,
             "side": BUY,
             "tif": int(Tif.GTC),
             "qty": 1,

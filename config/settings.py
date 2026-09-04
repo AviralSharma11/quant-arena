@@ -47,6 +47,71 @@ def _require(table: dict, section: str, key: str):
 
 
 @dataclass(frozen=True)
+class Symbol:
+    """One tradeable instrument, as `GET /symbols` serves it.
+
+    `contracts/v1/rest_and_ws.md` section 2.3 makes this endpoint the **only** place symbol
+    names and tick sizes are defined, and therefore the only thing that maps the `symbol_id`
+    on the wire to something a human reads. So the definition lives in the shared configuration
+    file — hashed into every process's startup line — rather than in a table the gateway owns
+    and the matcher cannot see.
+
+    `tick_size_ticks` is the divisor the presentation layer applies for display. It never
+    travels back: a price that reaches the gateway is always integer ticks (Open Issue 016).
+    """
+
+    symbol_id: int
+    name: str
+    tick_size_ticks: int
+    lot_size: int
+
+
+def _symbols(raw: object) -> tuple[Symbol, ...]:
+    """Parse `[[symbols.listed]]`, failing loudly on anything malformed.
+
+    Every field is required for the same reason every other configuration value is: a symbol
+    with a defaulted tick size would render prices wrongly and silently, which is precisely the
+    class of failure `_require` exists to prevent.
+    """
+    if not isinstance(raw, list):
+        raise ConfigError("symbols.listed must be an array of tables")
+
+    parsed: list[Symbol] = []
+    seen_ids: set[int] = set()
+    seen_names: set[str] = set()
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"symbols.listed[{index}] must be a table")
+        try:
+            symbol = Symbol(
+                symbol_id=entry["symbol_id"],
+                name=entry["name"],
+                tick_size_ticks=entry["tick_size_ticks"],
+                lot_size=entry["lot_size"],
+            )
+        except KeyError as exc:
+            raise ConfigError(
+                f"symbols.listed[{index}] is missing {exc.args[0]}. Every field is required — "
+                f"a defaulted tick size would misprice the display silently."
+            ) from exc
+        # `symbol_id` is an i16 on the wire (contracts/v1/schema.toml), and it is the key every
+        # consumer indexes by — the matcher holds one book per id. A duplicate would give two
+        # instruments one book; a duplicate name would make `GET /symbols` ambiguous to resolve.
+        if symbol.symbol_id in seen_ids:
+            raise ConfigError(f"symbols.listed: duplicate symbol_id {symbol.symbol_id}")
+        if symbol.name in seen_names:
+            raise ConfigError(f"symbols.listed: duplicate name {symbol.name!r}")
+        if not 0 <= symbol.symbol_id <= 2**15 - 1:
+            raise ConfigError(
+                f"symbols.listed: symbol_id {symbol.symbol_id} is outside the contract's i16"
+            )
+        seen_ids.add(symbol.symbol_id)
+        seen_names.add(symbol.name)
+        parsed.append(symbol)
+    return tuple(parsed)
+
+
+@dataclass(frozen=True)
 class Settings:
     # --- configuration: from the file, covered by config_hash -------------------------------
     initial_cash_ticks: int
@@ -64,7 +129,7 @@ class Settings:
     stream_maxlen: int
     stream_batch_max: int
     stream_health_poll_ms: int
-    symbols: tuple[str, ...]
+    symbols: tuple[Symbol, ...]
 
     # --- infrastructure: from the environment, NOT covered by config_hash -------------------
     redis_url: str
@@ -107,7 +172,7 @@ class Settings:
             stream_maxlen=_require(table, "streams", "maxlen"),
             stream_batch_max=_require(table, "streams", "batch_max"),
             stream_health_poll_ms=_require(table, "streams", "health_poll_ms"),
-            symbols=tuple(_require(table, "symbols", "listed")),
+            symbols=_symbols(_require(table, "symbols", "listed")),
             redis_url=os.environ.get("QA_REDIS_URL", "redis://localhost:6379/0"),
             database_url=os.environ.get(
                 "QA_DATABASE_URL",

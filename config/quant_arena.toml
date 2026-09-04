@@ -73,6 +73,30 @@ health_poll_ms = 500
 ttl_seconds = 3600
 
 [symbols]
-# The ten symbols and their tick sizes are decided in Task 5.1, from replayed crypto history.
-# Deliberately empty until then rather than filled with invented values.
-listed = []
+# PROVISIONAL — replaced wholesale by Task 5.1.
+#
+# The ten real symbols and their tick sizes are decided in 5.1, from replayed crypto history.
+# This block was empty until week 4, on the principle that an invented list looks settled when
+# it is not. Week 4 forced the issue: Task 4.4's bots need something to quote, and `GET /symbols`
+# is the frozen contract's only source of symbol names, tick sizes and the enum tables, so the
+# frontend (5.4c) cannot resolve a `symbol_id` without it either. Two entries rather than one,
+# so that the matcher's one-book-per-`symbol_id` rule is exercised rather than assumed.
+#
+# The names are deliberately meaningless. Open Issue 005 section 10 and Task 5.1 both forbid
+# naming a symbol after a real instrument, and a placeholder that reads like a real ticker is
+# the one most likely to survive into the demonstration by accident.
+#
+# `tick_size_ticks = 1` is not a considered value: the frontend divides by it for display, and
+# 1 is the only figure that asserts nothing about a scale 5.1 has yet to choose.
+
+[[symbols.listed]]
+symbol_id = 1
+name = "QAA"
+tick_size_ticks = 1
+lot_size = 1
+
+[[symbols.listed]]
+symbol_id = 2
+name = "QAB"
+tick_size_ticks = 1
+lot_size = 1

@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
+
 import psycopg
 import pytest
+import redis as redis_sync
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import create_async_engine
 
+from contracts.v1.generated.contracts import CreateAccount, unpack_any
 from services.gateway.security import ARGON2ID_PREFIX
+from services.gateway.streams import RECORD_FIELD
+from services.ledger.consumer import LedgerConsumer
 
 TEST_DSN = "postgresql://quant:quant@localhost:5432/quant_arena_test"
 
@@ -16,21 +24,83 @@ def _rows(sql: str, params: tuple = ()) -> list[tuple]:
         return conn.execute(sql, params).fetchall()
 
 
+def _one_inbound_record(settings):
+    """The single record the gateway appended, unpacked."""
+    r = redis_sync.Redis.from_url(settings.redis_url)
+    try:
+        entries = r.xrange(settings.stream_inbound, "-", "+")
+    finally:
+        r.close()
+    assert len(entries) == 1, entries
+    return unpack_any(entries[0][1][RECORD_FIELD])
+
+
+def _project_to_read_model(settings):
+    """Run the real `LedgerConsumer` once, the way `python -m services.ledger` does."""
+
+    async def _run():
+        redis = redis_sync.asyncio.Redis.from_url(
+            settings.redis_url, decode_responses=False
+        )
+        db = create_async_engine(settings.database_url)
+        try:
+            await LedgerConsumer(
+                redis, db, settings.stream_outbound
+            ).replay_from_genesis()
+        finally:
+            await db.dispose()
+            await redis.aclose()
+
+    asyncio.run(_run())
+
+
 # --- Criterion 1: a user registers, logs in, and receives virtual capital -------------------
 
 
-def test_register_grants_virtual_capital(client: TestClient, settings):
+def test_register_records_the_grant_as_an_event(client: TestClient, settings):
+    """The grant is a `CreateAccount` on the inbound stream, not a row the gateway wrote.
+
+    This changed in week 4. Writing `accounts` directly made PostgreSQL the source of truth for
+    a balance, which Open Issue 004 forbids, and left `LedgerConsumer` unable to run: the ledger
+    rebuilds `accounts` by replaying the stream, and a stream that never carried the grant would
+    have replayed every balance to zero.
+
+    So the response is acknowledgement-shaped, exactly like `POST /orders` — it carries the
+    stream id the record landed at and no `cash_ticks`, because at that moment the gateway has
+    not observed a balance and must not assert one.
+    """
     response = client.post(
         "/auth/register", json={"username": "alice", "password": "a-long-enough-pw"}
     )
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["username"] == "alice"
-    assert body["cash_ticks"] == settings.initial_cash_ticks
+    assert "cash_ticks" not in body
+    # A Redis stream id, "<ms>-<ord>" — which *is* the sequence number (Open Issue 003).
+    assert re.fullmatch(r"\d+-\d+", body["seq"]), body["seq"]
+
+    record = _one_inbound_record(settings)
+    assert isinstance(record, CreateAccount)
+    assert record.user_id == body["user_id"]
+    # `CreateAccount` has no cash field: the engine is money-blind (Open Issue 001) and reads
+    # the grant from the shared configuration when it forwards `AccountCreated`.
+    assert not hasattr(record, "amount_ticks")
 
 
-def test_the_grant_actually_lands_in_the_accounts_table(client: TestClient, settings):
+def test_the_grant_lands_in_the_accounts_table_once_the_stream_is_consumed(
+    client: TestClient, settings, pump
+):
+    """The read model is derived, so it moves only when something derives it.
+
+    `pump` is the matcher and the projection the deployed stack runs as their own processes.
+    Registration alone leaves `accounts` empty, and that is correct rather than broken.
+    """
     client.post("/auth/register", json={"username": "bob", "password": "a-long-enough-pw"})
+    assert _rows("select 1 from accounts") == [], "no consumer has run yet"
+
+    pump()
+    _project_to_read_model(settings)
+
     rows = _rows(
         "select a.cash_ticks from accounts a join users u on u.id = a.user_id"
         " where u.username = %s",

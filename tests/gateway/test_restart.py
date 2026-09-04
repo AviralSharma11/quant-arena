@@ -89,16 +89,20 @@ def test_session_survives_a_real_process_restart(settings):
         login = client.post("/auth/login", json=USER)
         assert login.status_code == 200, login.text
         cookie = login.cookies["qa_session"]
-        assert client.post("/orders", json=ORDER).status_code == 202
+        # `GET /portfolio` is the probe, not `POST /orders`. Both sit behind the same session
+        # dependency, but from week 4 an order also needs a matcher to have forwarded the cash
+        # grant, and no matcher runs against this subprocess. Probing with an order would make
+        # this test fail for a funding reason while claiming a session reason.
+        assert client.get("/portfolio").status_code == 200
         client.close()
 
     # The process that issued that cookie no longer exists. Nothing in its memory survived.
     with running_gateway(settings) as base:
-        response = httpx.post(
-            f"{base}/orders", json=ORDER, cookies={"qa_session": cookie}, timeout=10.0
+        response = httpx.get(
+            f"{base}/portfolio", cookies={"qa_session": cookie}, timeout=10.0
         )
 
-    assert response.status_code == 202, (
+    assert response.status_code == 200, (
         "the session did not survive a real process restart — it was being held in the "
         f"gateway's own memory rather than in Redis (got {response.status_code})"
     )

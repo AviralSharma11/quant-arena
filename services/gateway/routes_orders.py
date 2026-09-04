@@ -9,12 +9,10 @@ therefore null — the engine assigns it, and it arrives on the private stream. 
 Redis stream ID, which *is* the sequence number (Open Issue 003); it is never a counter kept
 alongside.
 
-Deliberately absent, each a later task rather than an oversight:
-
-- **No idempotency.** A repeated `client_order_id` is not detected yet — Task 3.2.
-- **No risk checks or reservations.** Nobody's cash is consulted — Task 3.1.
-- **No symbol existence check.** `symbol_id` is range-checked but not looked up; the symbol
-  registry arrives with Task 5.1. `RejectReason.UNKNOWN_SYMBOL` already exists for it.
+Validation is now complete on this path: idempotency (3.2), risk and reservations (3.1), the
+market-order band (3.1), and — from week 4 — the symbol lookup, against the registry
+`GET /symbols` serves. The symbol table itself is still provisional; Task 5.1 replaces it with
+ten symbols drawn from replayed crypto history, and this code does not change when it does.
 
 The inbound stream is consumed by `services/matcher`, which wraps Dev A's naive model — the
 end-of-week-2 integration point (Appendix D.2). The stub engine is gone.
@@ -30,7 +28,15 @@ from pydantic import BaseModel, Field, model_validator
 
 from config.settings import Settings
 from contracts.v1.generated.contracts import CancelOrder, Side, SubmitOrder, Tif
-from services.gateway.deps import Config, CurrentUser, DbSession, Idempotency, Streams
+from services.gateway.deps import (
+    Config,
+    CurrentUser,
+    DbSession,
+    Idempotency,
+    RateLimit,
+    Streams,
+)
+from services.gateway.ratelimit import RateLimiter
 from services.gateway.streams import ExchangeHalted
 
 router = APIRouter(tags=["orders"])
@@ -107,6 +113,23 @@ class PortfolioResponse(BaseModel):
     positions: list[PositionItem]
 
 
+def _enforce_rate_limit(limiter: RateLimiter, user_id: int) -> None:
+    """Admission control, ahead of every other check — including the idempotency claim.
+
+    Order matters. A request rejected *after* claiming its key would leave that
+    `client_order_id` permanently answered "rejected: RATE_LIMITED", and the client's correct
+    retry of the very same intent would keep getting that stored answer back for the whole TTL.
+    A 429 means "not processed, ask again", so nothing about it may be recorded against the key.
+    """
+    if limiter.allow(user_id):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={"status": "rate_limited", "reason": "MAX_ORDERS_PER_SECOND"},
+        headers={"Retry-After": str(max(1, round(limiter.retry_after_seconds(user_id))))},
+    )
+
+
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
     body: SubmitOrderRequest,
@@ -115,7 +138,12 @@ async def submit_order(
     streams: Streams,
     settings: Config,
     idempotency: Idempotency,
+    limiter: RateLimit,
 ) -> AcknowledgementResponse:
+    # Step 0: admission control. Bots are subject to this exactly as a browser is —
+    # Task 4.4 forbids special-casing them anywhere in the gateway.
+    _enforce_rate_limit(limiter, user_id)
+
     # Step 1: claim the idempotency key
     outcome = await idempotency.claim(user_id, body.client_order_id)
 
@@ -149,7 +177,21 @@ async def submit_order(
 
     risk = request.app.state.risk
 
-    # Step 2: a market order becomes a marketable limit order, banded off the opposing side.
+    # Step 2: the symbol must exist. `symbol_id` was only ever range-checked against the
+    # contract's i16 until now; the registry that makes a lookup possible arrived with
+    # `GET /symbols` in week 4. The check lives here and not in the matcher because the matcher
+    # is money-blind and registry-free by design (`services/matcher/adapter.py`), and because a
+    # rejection recorded against the idempotency key is one the client can retry into.
+    if body.symbol_id not in {symbol.symbol_id for symbol in settings.symbols}:
+        await idempotency.record_rejected(
+            user_id, body.client_order_id, "UNKNOWN_SYMBOL"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": "UNKNOWN_SYMBOL"},
+        )
+
+    # Step 3: a market order becomes a marketable limit order, banded off the opposing side.
     price_ticks = body.price_ticks
     tif = int(body.tif)
     if body.order_type == "market":
@@ -173,7 +215,7 @@ async def submit_order(
         # against the book on arrival is cancelled rather than left sitting at the band price.
         tif = int(Tif.IOC)
 
-    # Step 3: validate available cash
+    # Step 4: validate available cash
     order_cost = price_ticks * body.qty
     if risk.available_cash(user_id) < order_cost:
         # Reject and record the rejection
@@ -185,7 +227,7 @@ async def submit_order(
             detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
         )
 
-    # Step 4: reserve the cash, at the price that will actually be sent
+    # Step 5: reserve the cash, at the price that will actually be sent
     order = SubmitOrder.new(
         timestamp_ns=time.time_ns(),  # gateway-assigned; the engine never reads a clock
         client_order_id=body.client_order_id,
@@ -205,7 +247,7 @@ async def submit_order(
         qty=body.qty,
     )
 
-    # Step 5: append to stream (claim and append are atomic via the idempotency key)
+    # Step 6: append to stream (claim and append are atomic via the idempotency key)
     try:
         stream_id = await streams.append(settings.stream_inbound, order)
     except ExchangeHalted as halted:
@@ -226,7 +268,7 @@ async def submit_order(
         )
         raise
 
-    # Step 5: record the acceptance
+    # Step 7: record the acceptance
     # Note: order_id is None because the engine assigns it; we store None (not 0)
     await idempotency.record_accepted(
         user_id, body.client_order_id, None, stream_id
@@ -301,7 +343,10 @@ async def cancel_order(
     streams: Streams,
     settings: Config,
     idempotency: Idempotency,
+    limiter: RateLimit,
 ) -> AcknowledgementResponse:
+    _enforce_rate_limit(limiter, user_id)
+
     if not 0 <= target_client_order_id <= U64_MAX:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "target_client_order_id out of range")
 

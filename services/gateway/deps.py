@@ -14,6 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config.settings import Settings
 from services.gateway.idempotency import IdempotencyStore
+from services.gateway.ratelimit import RateLimiter
 from services.gateway.sessions import SessionStore
 from services.gateway.streams import HaltState, StreamProducer
 
@@ -28,6 +29,10 @@ def get_sessions(request: Request) -> SessionStore:
 
 def get_idempotency(request: Request) -> IdempotencyStore:
     return request.app.state.idempotency
+
+
+def get_ratelimit(request: Request) -> RateLimiter:
+    return request.app.state.ratelimit
 
 
 def get_streams(request: Request) -> StreamProducer:
@@ -60,6 +65,7 @@ async def current_user_id(
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 Sessions = Annotated[SessionStore, Depends(get_sessions)]
 Idempotency = Annotated[IdempotencyStore, Depends(get_idempotency)]
+RateLimit = Annotated[RateLimiter, Depends(get_ratelimit)]
 Config = Annotated[Settings, Depends(get_settings)]
 CurrentUser = Annotated[int, Depends(current_user_id)]
 Streams = Annotated[StreamProducer, Depends(get_streams)]

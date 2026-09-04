@@ -113,6 +113,41 @@ services:
       retries: 12
       start_period: 10s
 
+  ledger:
+    build: .
+    restart: unless-stopped
+    # The read-model projection: outbound stream in, PostgreSQL out. Its own process so that it
+    # is the *single writer* of accounts, positions, open_orders and house_fees — which is what
+    # Open Issue 004 means by PostgreSQL being a derived read model. Two writers and it would
+    # not be derived from anything.
+    command: ["python", "-m", "services.ledger"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # Not decoration. The gateway is what runs `SQLModel.metadata.create_all`, so a ledger
+      # that started first would replay the stream and then fail to write it into tables that
+      # do not exist yet.
+      gateway:
+        condition: service_healthy
+    environment:
+      QA_REDIS_URL: redis://redis:6379/0
+      QA_DATABASE_URL: postgresql+psycopg://quant:${QA_POSTGRES_PASSWORD:-quant}@postgres:5432/quant_arena
+    # Like the matcher: no HTTP surface, so liveness is "the process is up and can still reach
+    # the stores". Whether the projection is *caught up* is a lag question, and a lag alarm
+    # belongs with the benchmarks (Open Issue 012), not in a container healthcheck.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,redis,sys; sys.exit(0 if redis.Redis.from_url(os.environ['QA_REDIS_URL']).ping() else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
 volumes:
   pgdata:
   redisdata:

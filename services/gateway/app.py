@@ -25,9 +25,11 @@ from config.settings import settings as default_settings
 from config.startup import log_startup
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
 from services.gateway.idempotency import IdempotencyStore
+from services.gateway.ratelimit import RateLimiter
 from services.gateway.risk import RiskState
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
+from services.gateway.routes_symbols import router as symbols_router
 from services.gateway.sessions import SessionStore
 from services.gateway.streams import (
     UNREACHABLE,
@@ -58,6 +60,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.redis = redis
         app.state.sessions = SessionStore(redis, settings.session_ttl_seconds)
         app.state.idempotency = IdempotencyStore(redis, settings.idempotency_ttl_seconds)
+        # Admission control, ahead of every other check on the order path. Process memory,
+        # like RiskState and for the same reasons (Open Issue 004): hot path, single producer.
+        app.state.ratelimit = RateLimiter(settings.max_orders_per_second)
         app.state.db_sessionmaker = async_sessionmaker(
             db, class_=AsyncSession, expire_on_commit=False
         )
@@ -172,6 +177,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(orders_router)
+    app.include_router(symbols_router)
     return app
 
 

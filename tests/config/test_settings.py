@@ -60,10 +60,88 @@ def test_settled_values_match_their_decisions(attribute: str, expected: int, sou
     assert getattr(Settings.load(), attribute) == expected, source
 
 
-def test_symbols_are_left_empty_until_task_5_1():
-    """Ten symbols and their tick sizes are decided in 5.1, from replayed crypto history.
-    An invented list here would be a settled-looking value nobody actually settled."""
-    assert Settings.load().symbols == ()
+#: A complete, valid configuration with one symbol, for the malformed-symbol tests below.
+#: Everything except the `[[symbols.listed]]` block is the minimum `Settings.load` requires.
+_MINIMAL_CONFIG = """
+    [exchange]
+    initial_cash_ticks = 1
+    [session]
+    ttl_seconds = 1
+    cookie_name = "x"
+    cookie_samesite = "strict"
+    [limits]
+    max_orders_per_second = 1
+    market_order_band_bps = 500
+    [idempotency]
+    ttl_seconds = 3600
+    [market_data]
+    conflation_hz = 20
+    book_depth = 10
+    [replay]
+    real_seconds_per_simulated_minute = 1
+    [streams]
+    inbound = "in"
+    outbound = "out"
+    maxlen = 10
+    batch_max = 10
+    health_poll_ms = 500
+    [[symbols.listed]]
+    symbol_id = 1
+    name = "QAA"
+    tick_size_ticks = 1
+    lot_size = 1
+"""
+
+#: A second entry reusing symbol_id 1.
+_SECOND_SYMBOL_WITH_ID_ONE = """
+    [[symbols.listed]]
+    symbol_id = 1
+    name = "QAB"
+    tick_size_ticks = 1
+    lot_size = 1
+"""
+
+
+def test_symbols_are_provisional_until_task_5_1():
+    """The listed symbols are placeholders, and the test says so out loud.
+
+    They were empty until week 4 on the principle that an invented list looks settled when it
+    is not. Week 4 forced the issue — Task 4.4's bots need something to quote and `GET /symbols`
+    is the frozen contract's only source of names, tick sizes and the enum tables. Task 5.1
+    replaces this block wholesale with ten symbols drawn from replayed crypto history.
+
+    Two entries, not one, so that the matcher's one-book-per-`symbol_id` rule is exercised
+    rather than assumed.
+    """
+    symbols = Settings.load().symbols
+    assert [s.symbol_id for s in symbols] == [1, 2]
+    assert [s.name for s in symbols] == ["QAA", "QAB"]
+    # Open Issue 005 section 10 and Task 5.1 both forbid naming a symbol after a real
+    # instrument. A placeholder that reads like a real ticker is the one most likely to
+    # survive into the demonstration by accident.
+    assert not {s.name for s in symbols} & {"BTC", "ETH", "SOL", "XRP", "DOGE", "ADA"}
+
+
+def test_a_symbol_missing_a_field_fails_loudly(tmp_path: Path):
+    """Same rule as every other configuration value: no field may be defaulted.
+
+    A symbol with a defaulted tick size would misprice the display silently, which is the
+    class of failure `_require` exists to prevent.
+    """
+    config = _write_config(
+        tmp_path,
+        _MINIMAL_CONFIG.replace("    tick_size_ticks = 1\n", ""),
+    )
+    with pytest.raises(ConfigError, match="tick_size_ticks"):
+        Settings.load(config)
+
+
+def test_a_duplicate_symbol_id_fails_loudly(tmp_path: Path):
+    """`symbol_id` is the key every consumer indexes by — the matcher holds one book per id,
+    so two instruments sharing an id would share a book and trade against each other."""
+    config = _write_config(tmp_path, _MINIMAL_CONFIG + _SECOND_SYMBOL_WITH_ID_ONE)
+    with pytest.raises(ConfigError, match="duplicate symbol_id"):
+        Settings.load(config)
 
 
 # --- the boundary: one file, no code defaults ------------------------------------------------
