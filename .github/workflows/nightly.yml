@@ -1,0 +1,78 @@
+# The nightly workflow. Task 3.3 asks for a stub here and nothing more: the generated tests
+# that will fill it are Task 4.1's (differential, property and determinism, T2–T4), scheduled
+# for week 4 and owned by Dev A.
+#
+# It is a stub in scope, not in function. It already runs every generated test the repository
+# has today — the ones ci.yml deselects — so the split is live from the first night rather than
+# being a promise that gets tested for the first time in week 4.
+#
+# What week 4 adds: the differential run against the C++ engine, and a longer Hypothesis
+# budget. Both belong here because they are slow and variable, which is exactly why 3.3's
+# Boundaries block keeps them out of the per-commit suite.
+
+name: Nightly
+
+on:
+  schedule:
+    # 02:30 UTC — 08:00 IST, so a failure is waiting at the start of the day rather than
+    # discovered at the end of it.
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  generated:
+    name: Generated and property-based tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    # Same stores, same hardcoded DSNs as ci.yml. See the comment there.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quant
+          POSTGRES_PASSWORD: quant
+          POSTGRES_DB: quant_arena
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quant -d quant_arena"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Generated and property-based tests
+        run: pytest -q -m "property" --durations=10
+
+      # A failing example is the whole value of this workflow, and Hypothesis writes it to
+      # .hypothesis/ where it would otherwise die with the runner.
+      - name: Upload the Hypothesis example database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypothesis-examples
+          path: .hypothesis/
+          if-no-files-found: ignore
+          retention-days: 14

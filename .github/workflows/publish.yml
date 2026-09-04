@@ -1,0 +1,65 @@
+# Publishes the gateway container image to the GitHub Container Registry. Task 3.3's second
+# deliverable ("publish container images"), and the only half of it that needs no server.
+#
+# Why two architectures. The deployment target is still open, and the strongest free option
+# (Oracle Cloud's Always Free tier) is Ampere ARM while every other candidate is x86. Building
+# both here means the VM decision no longer gates anything: whichever target wins, the image
+# already exists for it. linux/arm64 is built under QEMU emulation, which is slow — acceptable,
+# because nothing waits on this workflow and the image is pip-install-only with wheels for both
+# architectures.
+#
+# Why there is no test gate here. `main` requires the CI check to pass before a merge, so
+# anything reaching this trigger has already run the fixed suite. Re-running it would double
+# the cost to re-answer a question `main` has already answered.
+
+name: Publish images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  gateway:
+    name: Gateway image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR rejects an uppercase path component, and the owner here is mixed case.
+      - name: Compute the image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/quant-arena-gateway" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # The commit SHA is the tag a deployment pins; `latest` is a convenience and must
+          # never be what a redeploy names, or the redeploy is not reproducible.
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
