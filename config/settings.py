@@ -130,6 +130,8 @@ class Settings:
     stream_batch_max: int
     stream_health_poll_ms: int
     symbols: tuple[Symbol, ...]
+    #: Usernames permitted to hold negative inventory. See the config file.
+    designated_market_maker_accounts: frozenset[str]
 
     # --- infrastructure: from the environment, NOT covered by config_hash -------------------
     redis_url: str
@@ -173,6 +175,9 @@ class Settings:
             stream_batch_max=_require(table, "streams", "batch_max"),
             stream_health_poll_ms=_require(table, "streams", "health_poll_ms"),
             symbols=_symbols(_require(table, "symbols", "listed")),
+            designated_market_maker_accounts=frozenset(
+                _require(table, "bots", "designated_market_maker_accounts")
+            ),
             redis_url=os.environ.get("QA_REDIS_URL", "redis://localhost:6379/0"),
             database_url=os.environ.get(
                 "QA_DATABASE_URL",

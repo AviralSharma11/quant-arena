@@ -243,7 +243,7 @@ def test_a_fill_better_than_the_limit_releases_the_whole_reservation():
     )
     state.reserved[1] = 10_000
 
-    state._release_fill(5, user_id=1, qty=10, price_ticks=900)
+    state._release_fill(5, qty=10)
 
     assert state.reserved[1] == 0, "the price improvement must not stay reserved"
     assert 5 not in state.open_orders
@@ -257,7 +257,7 @@ def test_a_filled_sell_leaves_the_resting_book():
         side=SELL, price_ticks=900, qty=10,
     )
 
-    state._release_fill(6, user_id=2, qty=10, price_ticks=900)
+    state._release_fill(6, qty=10)
 
     assert 6 not in state.open_orders
     assert state.best_ask(1) is None

@@ -130,6 +130,22 @@ def _enforce_rate_limit(limiter: RateLimiter, user_id: int) -> None:
     )
 
 
+def _abandon(risk, user_id: int, client_order_id: int) -> None:
+    """Undo a reservation for an order that was never appended.
+
+    Two things had to be undone and only one was: the committed resource, and the pending
+    entry itself. Leaving the entry behind meant a later `OrderAccepted` — for a *different*
+    order that happened to reuse the id after the idempotency TTL — could adopt a reservation
+    belonging to an order that never existed.
+
+    It also poked `reserved` directly, which is right for a buy and silently wrong for a sell.
+    Going through `release` means the resource is chosen by the reservation, not by the caller.
+    """
+    reservation = risk.pending_by_client.pop((user_id, client_order_id), None)
+    if reservation is not None:
+        risk.release(reservation, reservation.qty)
+
+
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
 async def submit_order(
     body: SubmitOrderRequest,
@@ -215,16 +231,21 @@ async def submit_order(
         # against the book on arrival is cancelled rather than left sitting at the band price.
         tif = int(Tif.IOC)
 
-    # Step 4: validate available cash
-    order_cost = price_ticks * body.qty
-    if risk.available_cash(user_id) < order_cost:
-        # Reject and record the rejection
-        await idempotency.record_rejected(
-            user_id, body.client_order_id, "INSUFFICIENT_CASH"
-        )
+    # Step 4: validate the resource this side actually consumes — cash for a buy, inventory
+    # for a sell. `RiskState` owns the rule so that the check and the accounting that
+    # implements it cannot drift apart.
+    reason = risk.reject_reason_for(
+        user_id=user_id,
+        symbol_id=body.symbol_id,
+        side=int(body.side),
+        price_ticks=price_ticks,
+        qty=body.qty,
+    )
+    if reason is not None:
+        await idempotency.record_rejected(user_id, body.client_order_id, reason.name)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"status": "rejected", "reason": "INSUFFICIENT_CASH"},
+            detail={"status": "rejected", "reason": reason.name},
         )
 
     # Step 5: reserve the cash, at the price that will actually be sent
@@ -253,7 +274,7 @@ async def submit_order(
     except ExchangeHalted as halted:
         # The exchange cannot durably record this. Fail loudly rather than time out silently,
         # or worse, accept an order that was never written (Open Issue 003 §8.5).
-        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        _abandon(risk, user_id, body.client_order_id)
         await idempotency.record_rejected(
             user_id, body.client_order_id, "EXCHANGE_HALTED"
         )
@@ -262,7 +283,7 @@ async def submit_order(
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
     except Exception:
-        risk.reserved[user_id] = max(0, risk.reserved.get(user_id, 0) - order_cost)
+        _abandon(risk, user_id, body.client_order_id)
         await idempotency.record_rejected(
             user_id, body.client_order_id, "INTERNAL_ERROR"
         )

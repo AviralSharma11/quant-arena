@@ -72,6 +72,29 @@ health_poll_ms = 500
 # session is rarely needed.
 ttl_seconds = 3600
 
+[bots]
+# Designated market makers, by username. Open Issue 005 section 10.6 confirmed the structure:
+# retail accounts are cash accounts and may never hold a negative position (Open Issue 004
+# section 5, invariant 2), while a designated market maker is permitted negative inventory in
+# exchange for quoting obligations. That is not a simplification away from reality — it is the
+# real-world arrangement, with margin accounts deferred to a later phase.
+#
+# An explicit list of names, and deliberately not a prefix rule like `dmm_*`. A pattern would
+# let anyone register `dmm_whatever` and grant themselves the exemption; a list cannot be
+# joined by registering.
+#
+# It lives here rather than in a database column or an admin endpoint for three reasons: the
+# REST surface is closed (Open Issue 016 section 10), configuration is version controlled and
+# hashed into every process's startup line so the grant is auditable and reproducible, and one
+# source of truth cannot drift from a second copy.
+#
+# Removing a name is safe in one direction only. An account that already holds negative
+# inventory becomes retail on the next restart, and can then only buy back — `available` is
+# already below zero, so no further sell passes the check. It heals rather than compounding.
+#
+# Task 4.4 creates one market maker per symbol; the list grows with the symbol table in 5.1.
+designated_market_maker_accounts = ["dmm_qaa", "dmm_qab"]
+
 [symbols]
 # PROVISIONAL — replaced wholesale by Task 5.1.
 #

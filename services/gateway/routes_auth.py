@@ -71,6 +71,7 @@ class RegisterResponse(BaseModel):
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
+    request: Request,
     db: DbSession,
     settings: Config,
     streams: Streams,
@@ -88,6 +89,14 @@ async def register(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    # A designated market maker is permitted to hold negative inventory; a retail account is
+    # not (Open Issue 005 section 10.6, and Task 4.4's Boundaries). The privilege is granted by
+    # `bots.designated_market_maker_accounts` in the shared configuration and nowhere else —
+    # notably not by anything in this request, so it cannot be claimed by registering under a
+    # chosen name. `RiskState.from_db` resolves the same list on a restart.
+    if body.username in settings.designated_market_maker_accounts:
+        request.app.state.risk.market_makers.add(user.id)
 
     # The virtual capital grant, as an event rather than a row. The amount is deliberately
     # absent from the record: `CreateAccount` has no cash field, because the engine is

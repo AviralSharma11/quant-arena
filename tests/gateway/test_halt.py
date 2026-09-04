@@ -15,6 +15,7 @@ recovering without being restarted.
 
 from __future__ import annotations
 
+import itertools
 import shutil
 import subprocess
 import time
@@ -82,9 +83,25 @@ def test_stopping_redis_halts_the_exchange_and_restarting_clears_it(running_stac
     session.post("/auth/register", json={"username": "halt_probe", "password": "correct-horse-b"})
     login = session.post("/auth/login", json={"username": "halt_probe", "password": "correct-horse-b"})
     assert login.status_code == 200, login.text
+    # A price the grant can actually afford. This was 6,412,500 against a 1,000,000 grant,
+    # which no account could ever have bought — the test simply never met the risk checks,
+    # because it skips whenever the compose stack is down and the stack was usually down.
     order = {"client_order_id": 90001, "symbol_id": 1, "side": 1, "tif": 1,
-             "price_ticks": 6_412_500, "qty": 1}
-    assert session.post("/orders", json=order).status_code == 202
+             "price_ticks": 1_000, "qty": 1}
+    # The grant is an event now, so it arrives when the matcher has forwarded it and the
+    # gateway has read it back off the outbound stream. Retry rather than sleep a guessed
+    # interval — and with a **fresh `client_order_id` each attempt**, because the first
+    # rejection is recorded against its key and every retry of that key would correctly get
+    # the identical rejection back for the whole idempotency TTL.
+    attempts = itertools.count(90001)
+    accepted = _wait_for(
+        lambda: (
+            r := session.post(
+                "/orders", json={**order, "client_order_id": next(attempts)}
+            )
+        ).status_code == 202 and r
+    )
+    assert accepted, "the grant never reached the gateway's risk state"
 
     # --- criterion 4 -------------------------------------------------------------------------
     _compose("stop", COMPOSE_SERVICE)
@@ -110,11 +127,40 @@ def test_stopping_redis_halts_the_exchange_and_restarting_clears_it(running_stac
     assert recovered and recovered["halted"] is False, "the halt never cleared on its own"
     assert recovered["reason"] is None and recovered["since_ns"] is None
 
+    # A brand-new client, registering and trading for the first time after the outage — so
+    # this proves auth, the grant and sequencing all work again, not merely that an existing
+    # session survived.
+    #
+    # It retries, because the *first* write after Redis returns can still fail. redis-py's
+    # pool may hand out a connection that died with the server, and the producer treats that
+    # as unreachable and refuses the append rather than retrying it. That refusal is correct
+    # and deliberate: the pipeline is not transactional, so a flush that errored part-way may
+    # already have written some entries, and retrying it inside the producer could duplicate
+    # an order. Open Issue 003 §8.5 says fail loudly instead — which puts the retry where it
+    # belongs, in the client. A real client retries; a test that gives up after one attempt
+    # is asserting that clients never have to.
     fresh = httpx.Client(base_url=GATEWAY, timeout=10.0)
-    fresh.post("/auth/register", json={"username": "after_halt", "password": "correct-horse-b"})
-    fresh.post("/auth/login", json={"username": "after_halt", "password": "correct-horse-b"})
-    accepted = fresh.post("/orders", json={**order, "client_order_id": 90003})
-    assert accepted.status_code == 202, accepted.text
+    credentials = {"username": "after_halt", "password": "correct-horse-b"}
+
+    def _registered_and_logged_in() -> bool:
+        registered = fresh.post("/auth/register", json=credentials)
+        # 409 means a previous attempt already created the row and only the grant failed.
+        if registered.status_code not in (201, 409):
+            return False
+        return fresh.post("/auth/login", json=credentials).status_code == 200
+
+    assert _wait_for(_registered_and_logged_in), "registration never succeeded after recovery"
+    # Same asynchronous grant, same retry with a fresh key each attempt. This user registered
+    # *during* the halt window's tail, so its `CreateAccount` may still be in flight.
+    after = itertools.count(90003)
+    accepted = _wait_for(
+        lambda: (
+            r := fresh.post(
+                "/orders", json={**order, "client_order_id": next(after)}
+            )
+        ).status_code == 202 and r
+    )
+    assert accepted, "recovered, but never accepted an order"
     assert accepted.json()["seq"], "recovered, but not sequencing"
 
     # The whole point of criterion 5: nothing was restarted to achieve any of that.
