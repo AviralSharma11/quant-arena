@@ -41,6 +41,19 @@ market_order_band_bps = 500
 conflation_hz = 20
 book_depth = 10
 
+# OHLCV bar widths, in seconds of **stream time** — the `timestamp_ns` the gateway stamped on
+# the order, not the wall clock of whoever is reading.
+#
+# REVISIT AT TASK 5.1. The distinction is currently invisible because stream time is wall-clock
+# time, but 5.1 introduces a replay clock at one real second to one simulated minute (Open
+# Issue 005 sub-decision 5g), and then "a one-minute bar" becomes ambiguous: one real minute, or
+# one simulated minute, which is one real second. At present rates the first holds thousands of
+# fills and the second holds a handful, and the backtester in 7.1 consumes whichever this means.
+#
+# Deliberately left as a width in configuration rather than a constant, so 5.1 can settle the
+# question by changing this line instead of the aggregation code.
+bar_bucket_seconds = [1, 60]
+
 [replay]
 # Open Issue 005 sub-decision 5g: one real second maps to one simulated minute, so a demo shows
 # a trading day rather than a quiet minute. Configurable, and stamped into the stream from 2.1.

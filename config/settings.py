@@ -189,6 +189,9 @@ class Settings:
     market_order_band_bps: int
     conflation_hz: int
     book_depth: int
+    #: Bar widths in seconds of stream time. See the config file — 5.1 revisits what a
+    #: second means once the replay clock exists.
+    bar_bucket_seconds: tuple[int, ...]
     replay_real_seconds_per_simulated_minute: int
     stream_inbound: str
     stream_outbound: str
@@ -234,6 +237,9 @@ class Settings:
             market_order_band_bps=_require(table, "limits", "market_order_band_bps"),
             conflation_hz=_require(table, "market_data", "conflation_hz"),
             book_depth=_require(table, "market_data", "book_depth"),
+            bar_bucket_seconds=tuple(
+                _require(table, "market_data", "bar_bucket_seconds")
+            ),
             replay_real_seconds_per_simulated_minute=_require(
                 table, "replay", "real_seconds_per_simulated_minute"
             ),

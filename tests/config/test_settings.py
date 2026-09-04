@@ -77,6 +77,7 @@ _MINIMAL_CONFIG = """
     [market_data]
     conflation_hz = 20
     book_depth = 10
+    bar_bucket_seconds = [1, 60]
     [replay]
     real_seconds_per_simulated_minute = 1
     [streams]
