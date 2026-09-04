@@ -4,3 +4,15 @@ __pycache__/
 .pytest_cache/
 .hypothesis/
 node_modules/
+
+# macOS / iCloud Drive sync conflicts. The repository lives under ~/Documents, which iCloud
+# syncs by default, and a conflict is written beside the original as "schema 2.toml" rather
+# than announced. Thirty-five appeared on 4 Sep — stale copies of tracked files, all of them
+# older versions whose content was already in git history.
+#
+# They are ignored rather than merely deleted because the failure mode is silent and expensive:
+# `contracts/v1/tests` was being collected twice, so a suite reporting 801 tests was really
+# running 568, and a `git add -A` would have committed the lot.
+*\ [0-9].*
+*\ [0-9][0-9].*
+.DS_Store

@@ -200,13 +200,22 @@ def _assume_no_outage(maker) -> None:
 
 
 def test_the_market_maker_keeps_a_two_sided_market_up(session):
-    """The book is never empty *because* something is obliged to quote into it."""
+    """The book is never empty *because* something is obliged to quote into it.
+
+    Measured over the session, not at the instant it stopped. Requoting pulls a side and
+    replaces it, so there is a real window in which one side is legitimately down — and an
+    assertion on the final instant fails whenever the session happens to end inside it, which
+    it intermittently did. The obligation meter samples after each complete tick, which is the
+    honest place to ask this; `test_the_market_maker_meets_its_uptime_obligation` holds the
+    criterion itself.
+    """
     runner, _, _ = session
     assert runner.makers, "no market maker was configured for any listed symbol"
     for maker in runner.makers:
-        assert maker.quotes_placed > 0, maker.summary()
-        assert maker.current_two_sided() is not None, (
-            f"the session ended with only one side up: {maker.summary()}"
+        summary = maker.summary()
+        assert maker.quotes_placed > 0, summary
+        assert maker.meter.two_sided_samples > 0, (
+            f"the maker never had both sides up at once: {summary}"
         )
 
 
