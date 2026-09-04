@@ -151,3 +151,44 @@ button {
   font-size: 0.85rem;
 }
 
+
+/* --- Task 5.4c: connection state and the frame-loop quote strip -------------------------- */
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+.conn-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.conn-connected { color: #1f5f5b; }
+.conn-connecting,
+.conn-reconnecting { color: #9e6516; }
+/* Halted is its own colour, not a flavour of disconnected: the socket is fine and the prices
+   are current, but the exchange cannot record an order (Open Issue 003 §8.5). */
+.conn-halted { color: #a6472e; }
+.conn-closed { color: #7a6f63; }
+
+.quotes { margin-top: 1.5rem; }
+
+.quote {
+  display: grid;
+  grid-template-columns: 4rem 8rem 8rem 5rem 1fr;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #e7e0d3;
+  /* Digits that change twenty times a second must not shift the columns around them. */
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.quote-symbol { font-weight: 600; }
+.quote-bid { color: #1f5f5b; }
+.quote-ask { color: #a6472e; }
+.quote-meter { color: #7a6f63; font-size: 0.8rem; }

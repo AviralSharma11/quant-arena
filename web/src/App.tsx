@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import { ConnectionIndicator } from "./components/ConnectionState";
+import { LiveQuote } from "./components/LiveQuote";
 import { ROUTES } from "./routes";
 import { Auth, type UserSession } from "./screens/Auth";
 import { Placeholder } from "./screens/Placeholder";
+import type { MarketBuffer } from "./stream/buffer";
+import { MOCK_SYMBOLS, startStreamSession, type StreamSession } from "./stream/session";
+import type { ConnectionState } from "./stream/types";
 
-function Nav({ user }: { user: UserSession | null }) {
+function Nav({ user, connection }: { user: UserSession | null; connection: ConnectionState }) {
   const { pathname } = useLocation();
   return (
     <nav>
@@ -18,7 +23,39 @@ function Nav({ user }: { user: UserSession | null }) {
           {route.id === "auth" && user ? `Sign in (${user.username})` : route.title}
         </Link>
       ))}
+      {/* On every screen, always. A trading interface that silently shows stale prices is
+          worse than one that admits it is disconnected (Open Issue 014 §14e). */}
+      <ConnectionIndicator state={connection} />
     </nav>
+  );
+}
+
+/**
+ * The trading route, until Task 6.1 builds it properly.
+ *
+ * One quote strip per symbol, painted by the `requestAnimationFrame` loop rather than by
+ * React — which is what makes Success Criterion 5 checkable at all. Deliberately not a book,
+ * not a chart, not an order ticket: those are 6.1's, and building them here would be building
+ * past the task.
+ */
+function Trading({ buffer }: { buffer: MarketBuffer | null }) {
+  const route = ROUTES.find((r) => r.id === "trading")!;
+  return (
+    <>
+      <Placeholder route={route} />
+      {buffer && (
+        <section className="quotes">
+          <h2>Live quotes</h2>
+          <p className="pending">
+            Painted outside React state, on the frame loop. The message and frame counts differ
+            because the browser conflates exactly as the server does.
+          </p>
+          {MOCK_SYMBOLS.map((symbol) => (
+            <LiveQuote key={symbol} symbol={symbol} buffer={buffer} />
+          ))}
+        </section>
+      )}
+    </>
   );
 }
 
@@ -31,6 +68,36 @@ export default function App() {
       return null;
     }
   });
+
+  // Low-frequency chrome, so React state is exactly right for it. The book is not here.
+  const [connection, setConnection] = useState<ConnectionState>("closed");
+  const [stream, setStream] = useState<StreamSession | null>(null);
+  const resyncing = useRef(false);
+
+  // One stream for the life of the app. Started here rather than per screen so that navigating
+  // between the three does not drop and re-establish the connection.
+  useEffect(() => {
+    const session = startStreamSession({
+      onState: setConnection,
+      onResync: async () => {
+        // A private-stream gap means this client missed an order event, so its view of open
+        // orders and balances is wrong (Open Issue 014 §14e). These two endpoints exist
+        // *solely* for this — the UI must never poll them.
+        if (resyncing.current) return;
+        resyncing.current = true;
+        try {
+          await Promise.all([
+            fetch("/orders/open").catch(() => null),
+            fetch("/portfolio").catch(() => null),
+          ]);
+        } finally {
+          resyncing.current = false;
+        }
+      },
+    });
+    setStream(session);
+    return () => session.stop();
+  }, []);
 
   // Verify session on page mount
   useEffect(() => {
@@ -74,7 +141,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Nav user={user} />
+      <Nav user={user} connection={connection} />
       <main>
         <Routes>
           {ROUTES.map((route) => (
@@ -84,6 +151,8 @@ export default function App() {
               element={
                 route.id === "auth" ? (
                   <Auth user={user} onLogin={handleLogin} onLogout={handleLogout} />
+                ) : route.id === "trading" ? (
+                  <Trading buffer={stream?.buffer ?? null} />
                 ) : (
                   <Placeholder route={route} />
                 )
