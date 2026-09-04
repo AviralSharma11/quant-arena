@@ -13,7 +13,6 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config.settings import Settings
-from services.gateway.engine_port import EnginePort
 from services.gateway.idempotency import IdempotencyStore
 from services.gateway.sessions import SessionStore
 from services.gateway.streams import HaltState, StreamProducer
@@ -29,10 +28,6 @@ def get_sessions(request: Request) -> SessionStore:
 
 def get_idempotency(request: Request) -> IdempotencyStore:
     return request.app.state.idempotency
-
-
-def get_engine(request: Request) -> EnginePort:
-    return request.app.state.engine
 
 
 def get_streams(request: Request) -> StreamProducer:
@@ -66,7 +61,6 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 Sessions = Annotated[SessionStore, Depends(get_sessions)]
 Idempotency = Annotated[IdempotencyStore, Depends(get_idempotency)]
 Config = Annotated[Settings, Depends(get_settings)]
-Engine = Annotated[EnginePort, Depends(get_engine)]
 CurrentUser = Annotated[int, Depends(current_user_id)]
 Streams = Annotated[StreamProducer, Depends(get_streams)]
 Halt = Annotated[HaltState, Depends(get_halt)]

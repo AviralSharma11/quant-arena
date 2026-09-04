@@ -1,7 +1,10 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-01 · **HEAD** `85e46d0` · **Week 3** (11–17 Sep) — Task 3.2 complete
-**State:** 28 order tests pass (all suites green). 3.2 idempotency with Lua atomic claim verified and merged.
+**Last updated:** 2026-09-02 · **HEAD** `fb2cd8a` · **Week 3** (11–17 Sep) — running 9 days early
+**State:** Everything through 3.2 is on `engine-integration`: the stub engine swapped for the
+naive model over the real stream, then week 3 merged in and audited. **416 tests pass**, 1
+skipped (C++ binary absent). The audit found four defects in 3.1/3.2; all four are fixed in
+`fb2cd8a`. `week-3-Risk-Management` is left at `eb9d653` and is not maintained further.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -13,27 +16,33 @@
 
 **Task 3.3 · Public deployment and CI** — Dev B, week 3
 
-- **Step:** decide deployment target (single VM or managed platform) · publish container images ·
-  deploy with TLS and domain · set up per-commit GitHub Actions suite (hand-written ,
-  determinism tests, unit tests, target <2 min) · add nightly stub.
-- **Files:** `Dockerfile`, `docker-compose.yml`, GitHub Actions workflows, deployment config.
-- **Done when:** application reachable over HTTPS · push runs fixed suite and blocks merge on
-  failure · redeployment is a single documented command · per-commit suite completes in under
-  two minutes. (`WEEKLY_PLAN.md` task 3.3, Success Criteria 1–4.)
+- **Step:** decide the deployment target · publish container images · deploy with TLS and a
+  domain · per-commit GitHub Actions suite · nightly stub.
+- **Files:** `Dockerfile`, `docker-compose.yml`, `.github/workflows/`, deployment config.
+- **Done when:** reachable over HTTPS · a push runs the suite and blocks merge on failure ·
+  redeploy is one documented command · the per-commit suite finishes under two minutes.
+  (`WEEKLY_PLAN.md` task 3.3, Success Criteria 1–4.)
+- **Carry into it:** the session cookie's `Secure` flag is off for the local http stack and
+  must go back on behind TLS. The matcher is now a compose service and needs deploying too.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **3.2** Idempotency — atomic claim-and-append (Dev B, wk 3)
-2. **3.3** Public deployment and CI (Dev B, wk 3)
+1. **4.4** Bots — market maker and noise traders (Dev B, wk 4)
+2. **5.2a** Fan-out process begins (Dev B, wk 4)
+3. **5.4c** WebSocket client, gap detection, rAF loop (Dev B, wk 4)
 
 ## Blocked / waiting
 
-- **On Dev A:** nothing.
-  *(End of week 2 is the first integration point: the stub engine is swapped for the real
-  stream and Dev A's naive model consumes it. Appendix D.2.)*
-- **On a decision from me:** nothing.
+- **On Dev A:** `naive_model.match()` prints the taker's price when the seller aggresses; the
+  frozen schema requires the resting (maker) price. Reported, not fixed — Dev A's file. Task
+  4.1's differential tests will disagree here until it lands.
+  *(Integration point 1 is passed. The next is end of week 5: the C++ engine process replaces
+  the naive model. Appendix D.2.)*
+- **On a decision from me:** whether registration should append `CreateAccount` to the stream
+  so the ledger can run as a process — see Open questions. Until it is settled, `/portfolio`
+  does not move after a fill in the deployed stack.
 - **On something external:** nothing.
 
 *Empty is the normal state. Dev B has almost no cross-developer dependencies. A long list here
@@ -53,13 +62,14 @@ means something is wrong with the plan, not with the week.*
 | 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
 | 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
 | 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
-| 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | — |
+| 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | merged to main as `e4352c1`; not reported by Dev A |
+| INT1 Stub engine → naive model over the stream | B | 2 | done | `8210d3a` · 21 matcher tests · live restart replayed 26, appended 0 |
 | 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
 | 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
 | 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
 | 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
-| 3.1  Risk checks + in-memory reservations | B | 3 | done | `44035c8` · 24 gateway order tests pass · available_cash check and reservation verified |
-| 3.2  Idempotency — atomic claim-and-append | B | 3 | done | `85e46d0` · 28 tests pass · Lua atomic claim + order & cancel idempotency verified · **unblocks Dev A 6.4** |
+| 3.1  Risk checks + in-memory reservations | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 5 of 6 criteria verified; criterion 3 unverified, see Deviations |
+| 3.2  Idempotency — atomic claim-and-append | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 6 of 6 criteria · concurrent burst now yields exactly one order · **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | deployment target decided here |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |
 | 4.4  Bots — market maker and noise traders | B | 4 | todo | — |
@@ -92,27 +102,31 @@ means something is wrong with the plan, not with the week.*
 
 ---
 
-## This week — week 2 (4–10 Sep)
+## This week — week 3 (11–17 Sep)
 
 Dev B's tasks with their Success Criteria as a live checklist. Deleted when the week closes.
 
-**2.1 Redis Streams, durability, halt state** — *unblocks Dev A 4.2, must not slip*
-- [x] An order is `XADD`ed and read back with a monotonically increasing stream ID
-- [x] Sustained `XADD` throughput measured and recorded, with the `appendfsync` setting and the
-      reasoning beside it
-- [x] `XREAD COUNT n` returns genuine batches under load; per-record cost recorded at 1, 10, 100
-- [x] Stopping Redis produces a visible halt state that rejects orders with a reason
-- [x] Restarting Redis clears the halt state without a gateway restart
+**3.1 Risk checks and in-memory reservations**
+- [x] Two rapid orders that together exceed the balance — the second is rejected
+- [x] A buy filling better than its limit releases the difference *(was leaking exactly the
+      price improvement; fixed `fb2cd8a`)*
+- [ ] A cancel that loses the race to a fill releases nothing — **not verified**, needs a
+      deterministic harness
+- [x] Restarting the gateway rebuilds reservations and balances identically by replay
+      *(was forgetting every reservation; fixed `fb2cd8a`)*
+- [x] No user's available balance ever goes negative
+- [x] A market order into a thin book cannot execute outside its band *(was not built at all)*
 
-**2.2 Ledger writer and replay rebuild**
-- [x] A fill moves both counterparties' cash and positions correctly
-- [x] Fees land in the house account; user cash + reservations + fee account is constant
-      except at deposits
-- [x] Killing the ledger and restarting reproduces byte-identical balances by replay
-- [x] No balance is ever written to PostgreSQL from any source other than the stream
+**3.2 Idempotency — atomic claim-and-append** — *unblocks Dev A 6.4*
+- [x] The same `client_order_id` twice produces exactly one order — sequentially **and**
+      concurrently *(8 concurrent retries produced 5 orders; fixed `fb2cd8a`)*
+- [x] A retry while the original is in flight returns `202 in_progress`
+- [x] A retry after a rejection returns the identical rejection and reason
+- [x] A duplicate submission leaves `reserved` unchanged
+- [x] A submission without a key is rejected `400` before any other processing
+- [x] Claim and append are atomic, so the gap between them cannot be observed
 
-**5.4b Auth screens**
-- [x] Login works and the session survives a page reload
+**3.3 Public deployment and CI** — see NOW.
 
 ---
 
@@ -139,6 +153,16 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-08-31 | `react-router-dom` added to the closed stack list | React ships no router and the three screens need one; the ~40-line hand-rolled alternative was weighed and rejected because 5.4b also needs a protected-route wrapper | **amends `CLAUDE.md` and OI 019** — applied in `3df522c` |
 | 2026-08-31 | No JavaScript test framework | Node 24 strips TypeScript natively, so the route table is inspected and the built app served from the existing pytest suite. Keeps the closed list one dependency wider, not three | — |
 | 2026-08-31 | Frontend stays out of `docker-compose.yml` | 1.4 is closed and deployment is 3.3's. The Vite dev server runs on the host against the containerised gateway | — |
+| 2026-09-02 | Recovery counts **anchors** — one outbound record per inbound record — instead of a checkpoint | A replay that re-appended its outbound records would duplicate fills that moved real positions. No snapshot (OI 018 §13.1) and no field added to a frozen schema | implements OI 018 §13.1 |
+| 2026-09-02 | The matcher holds **one book per `symbol_id`** | `naive_model.OrderBook.match()` crosses on price alone; a single book would trade symbol 3 against symbol 7 | — |
+| 2026-09-02 | The adapter emits the **maker's** price, discarding `naive_model`'s | `schema.toml` says `Fill.price_ticks` is always the resting price, and contracts v1 is frozen | flags a defect in Dev A's 1.2 |
+| 2026-09-02 | `StubEngine`, `engine_port.py` and the `Engine` dependency deleted | The seam CLAUDE.md asked to keep behind a thin interface is now the stream itself | closes the one load-bearing stub, Appendix D.2 |
+| 2026-09-02 | One image for gateway and matcher; `engine/` un-ignored in `.dockerignore` | They differ only in their command, so one image means they cannot drift onto different dependency sets. `engine/cpp` stays excluded — nothing in the image compiles it | — |
+| 2026-09-02 | `IdempotencyStore.claim()` reports **which caller won the key** | The Lua claim was always atomic, but the route collapsed "I claimed it" and "someone else holds it, in flight" into one status and submitted in both cases. That distinction is the whole of Success Criterion 3.2.2 | — |
+| 2026-09-02 | The risk replay **completes during startup**, before the first request is served | Starting the watcher and yielding leaves a window in which the gateway answers with every commitment forgotten | implements 3.1 criterion 4 |
+| 2026-09-02 | A reservation is released at the **limit** price, never the fill price | It was taken at the limit, so releasing at the fill strands the price improvement for the life of the process | implements 3.1 criterion 2 |
+| 2026-09-02 | Market-order band is `limits.market_order_band_bps`, 500 bps | 3.1 names `best_ask × 1.05`. It is the only thing between a market order and a thin book, so it is configuration, not a constant. Per-symbol bands belong with the symbol table in 5.1 | — |
+| 2026-09-02 | Top of book is **derived** from the resting orders the gateway already tracks | The gateway records every `OrderAccepted` for reservation accounting anyway, so a band needs a query, not a second book to keep in step | — |
 
 ## Deviations from the plan
 
@@ -148,6 +172,12 @@ decisions: a schedule deviation is not a design change.
 - **1.1's joint session (Appendix D.2) happened as async review, not a half-day together.**
   Dev B wrote the full contract as a proposal; Dev A reviewed and signed off the same day.
   Outcome as specified, mechanism not. No schedule impact.
+- **3.1 Success Criterion 3 is unverified, not passing.** "A cancel that loses the race to a
+  fill releases nothing" could not be constructed reliably against a live matcher. Recorded
+  rather than claimed. A deterministic harness for it is a natural fit for 4.1.
+- **Tasks 3.1 and 3.2 were marked `done` on their branch while four success criteria failed.**
+  Found by an audit on 2 Sep and fixed the same day. The lesson is in the checklist above:
+  a criterion is verified by exercising it, not by the task's own unit tests passing.
 
 ## How to run it right now
 
@@ -161,7 +191,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest -q               # 331 tests, against the compose stores
+.venv/bin/python -m pytest -q               # 416 tests, against the compose stores
+docker compose logs matcher                 # the replay count on every restart
 
 cd web && npm install && npm run dev        # frontend at localhost:5173, proxied to the gateway
 ```
@@ -170,7 +201,10 @@ that skip has not verified 1.1's Success Criterion 3.
 
 ## Open questions
 
-*(none)*
+- **`LedgerConsumer` is never run by any process**, so `/portfolio` does not move after a fill in
+  the deployed stack. Wiring it in requires registration to append `CreateAccount` to the stream
+  rather than writing the `accounts` row directly — which would break a passing criterion of
+  finished Task 1.3 (`tests/gateway/test_auth.py:35`). Needs a decision.
 
 ## Archive
 
@@ -179,3 +213,6 @@ that skip has not verified 1.1's Success Criterion 3.
 - **Week 1 (28 Aug – 3 Sep) — closed 31 Aug, 3 days early.** 1.1 contracts frozen and merged ·
   1.3 gateway skeleton · 1.4 Docker stack and shared config · 5.4a frontend scaffold. All Dev B
   and joint criteria passed with named tests; 331 tests green. Dev A's 1.2 and 2.3 not reported.
+- **Week 2 (4–10 Sep) — closed 2 Sep.** 2.1 streams and durability · 2.2 ledger and replay ·
+  5.4b auth screens · integration point 1: the stub engine swapped for Dev A's naive model over
+  the real stream. 398 tests green.
