@@ -1,8 +1,7 @@
-# Test dependencies. pytest and Hypothesis are named in the stack list; httpx is what
-# FastAPI's own TestClient is built on.
+# Test dependencies. pytest and Hypothesis are named in the stack list. httpx moved to
+# requirements.txt in Task 4.4 — the bots are a real process and need it at runtime.
 
 -r requirements.txt
 
 pytest==9.1.1
 hypothesis==6.167.1
-httpx==0.28.1

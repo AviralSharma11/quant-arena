@@ -148,6 +148,44 @@ services:
       retries: 12
       start_period: 10s
 
+  bots:
+    build: .
+    restart: unless-stopped
+    # Behind a profile, so it is off unless asked for:
+    #
+    #     docker compose --profile bots up
+    #
+    # A stack that always has a live market is what you want for a demonstration and the last
+    # thing you want under a test suite — the bots trade continuously, so every assertion about
+    # a book or a balance would be racing them. Making it a per-run choice rather than a
+    # per-checkout one is the whole reason this is a profile and not a plain service.
+    profiles: ["bots"]
+    command: ["python", "-m", "services.bots"]
+    depends_on:
+      # The gateway, because the bots are HTTP clients of it (Task 4.4's Boundaries: through
+      # the real API, never in process). The matcher, because a market order into a book
+      # nothing is matching has no opposing side and is refused outright.
+      gateway:
+        condition: service_healthy
+      matcher:
+        condition: service_healthy
+    environment:
+      QA_GATEWAY_URL: http://gateway:8000
+      # A secret, so it comes from the environment and never from the hashed configuration
+      # file. There is deliberately no default: a password with a default is a password in the
+      # repository the first time someone forgets to set it.
+      #
+      # Passed through empty rather than declared required with `:?`. Compose interpolates
+      # every service's environment whether or not its profile is selected, so `:?` here made
+      # `docker compose config` fail for the *default* stack — breaking the five-service
+      # assertion in tests/config/test_compose.py and anyone running `docker compose up`
+      # without bots. `services/bots/__main__.py` refuses to start without it, which is the
+      # place that can say why.
+      QA_BOT_PASSWORD: ${QA_BOT_PASSWORD:-}
+    # No healthcheck. A bot has no surface to probe, and "the process is up" says nothing about
+    # whether it is meeting its quoting obligations — which is measured and reported by the
+    # obligation meter, not by Docker.
+
 volumes:
   pgdata:
   redisdata:

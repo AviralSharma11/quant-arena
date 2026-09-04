@@ -112,6 +112,72 @@ def _symbols(raw: object) -> tuple[Symbol, ...]:
 
 
 @dataclass(frozen=True)
+class ObligationLimits:
+    """What a designated market maker is measured against (Open Issue 005 sub-decision 5h).
+
+    A market maker is defined by its obligations, not its privileges. The inventory exemption
+    in `designated_market_maker_accounts` is granted in exchange for these, so they are
+    configuration rather than constants — the exchange sets them, the bot meets them.
+    """
+
+    max_spread_bps: int
+    min_quote_size: int
+    min_two_sided_uptime: float
+
+
+@dataclass(frozen=True)
+class NoiseSettings:
+    count_per_symbol: int
+    arrivals_per_second: float
+    min_qty: int
+    max_qty: int
+
+
+@dataclass(frozen=True)
+class BotSettings:
+    """How the bots behave. Distinct from `designated_market_maker_accounts`, which stays a
+    top-level setting because it is a *gateway* rule about who may hold negative inventory —
+    the gateway reads that and never reads any of this."""
+
+    seed: int
+    quote_hz: int
+    half_spread_bps: int
+    quote_size: int
+    inventory_skew_bps: int
+    poll_interval_ms: int
+    fair_value_start_ticks: int
+    fair_value_volatility_ticks: int
+    obligations: ObligationLimits
+    noise: NoiseSettings
+
+
+def _bots(table: dict) -> BotSettings:
+    return BotSettings(
+        seed=_require(table, "bots", "seed"),
+        quote_hz=_require(table, "bots", "quote_hz"),
+        half_spread_bps=_require(table, "bots", "half_spread_bps"),
+        quote_size=_require(table, "bots", "quote_size"),
+        inventory_skew_bps=_require(table, "bots", "inventory_skew_bps"),
+        poll_interval_ms=_require(table, "bots", "poll_interval_ms"),
+        fair_value_start_ticks=_require(table, "bots", "fair_value_start_ticks"),
+        fair_value_volatility_ticks=_require(table, "bots", "fair_value_volatility_ticks"),
+        obligations=ObligationLimits(
+            max_spread_bps=_require(table["bots"], "obligations", "max_spread_bps"),
+            min_quote_size=_require(table["bots"], "obligations", "min_quote_size"),
+            min_two_sided_uptime=_require(
+                table["bots"], "obligations", "min_two_sided_uptime"
+            ),
+        ),
+        noise=NoiseSettings(
+            count_per_symbol=_require(table["bots"], "noise", "count_per_symbol"),
+            arrivals_per_second=_require(table["bots"], "noise", "arrivals_per_second"),
+            min_qty=_require(table["bots"], "noise", "min_qty"),
+            max_qty=_require(table["bots"], "noise", "max_qty"),
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class Settings:
     # --- configuration: from the file, covered by config_hash -------------------------------
     initial_cash_ticks: int
@@ -132,6 +198,8 @@ class Settings:
     symbols: tuple[Symbol, ...]
     #: Usernames permitted to hold negative inventory. See the config file.
     designated_market_maker_accounts: frozenset[str]
+    #: How the bots behave. Only the bot runner reads this.
+    bots: BotSettings
 
     # --- infrastructure: from the environment, NOT covered by config_hash -------------------
     redis_url: str
@@ -178,6 +246,7 @@ class Settings:
             designated_market_maker_accounts=frozenset(
                 _require(table, "bots", "designated_market_maker_accounts")
             ),
+            bots=_bots(table),
             redis_url=os.environ.get("QA_REDIS_URL", "redis://localhost:6379/0"),
             database_url=os.environ.get(
                 "QA_DATABASE_URL",

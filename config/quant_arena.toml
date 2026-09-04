@@ -95,6 +95,62 @@ ttl_seconds = 3600
 # Task 4.4 creates one market maker per symbol; the list grows with the symbol table in 5.1.
 designated_market_maker_accounts = ["dmm_qaa", "dmm_qab"]
 
+# The master seed. Every bot derives its own from this plus its name, so the whole session is
+# reproducible from one number (Open Issue 005 sub-decision 5d). Determinism here is a property
+# of **replaying the log**, not of reproducing a live session: bots run in real time and
+# interleave non-deterministically, and the log captures whichever sequence actually occurred.
+seed = 20260904
+
+# Quoting. `half_spread_bps` is measured against fair value, so the spread scales with price
+# rather than being a tick count that means something different on every symbol.
+quote_hz = 2
+half_spread_bps = 25
+quote_size = 100
+
+# The inventory skew: how far the quoted mid moves, in basis points of fair value, per one
+# full `quote_size` of inventory held. This is the single most important parameter in the file
+# (Open Issue 005 sub-decision 5b): a market maker that quotes symmetrically regardless of
+# position accumulates unbounded one-sided inventory and stops being able to quote at all.
+# Skewing against inventory is what real market makers do, and it is what keeps the simulation
+# stable over hours rather than minutes.
+#
+# Set equal to `half_spread_bps`, so one full fill moves the mid by half a spread — enough to
+# bias the next trade toward flattening, not enough to jump the market. Expressed in bps of
+# fair value rather than ticks per unit so that it means the same thing on every symbol and
+# does not change meaning when `quote_size` changes.
+inventory_skew_bps = 25
+
+# How often a bot re-reads its own position and resting orders. Until Task 5.2b there is no
+# private stream, so this is REST polling; when the stream lands it replaces the poller and
+# this value goes away.
+poll_interval_ms = 500
+
+# The synthetic fair-value process — a seeded random walk, replaced in Task 5.1 by replayed
+# crypto history (Open Issue 005 section 10.2 keeps this generator afterwards, for tests and
+# offline development). Parameters are fixed **before** any demonstration strategy is written:
+# tuning the market until a chosen strategy profits is curve-fitting one's own universe
+# (Open Issue 005 section 6).
+fair_value_start_ticks = 1_000
+fair_value_volatility_ticks = 2
+
+[bots.obligations]
+# What makes the bot a *designated* market maker rather than an unconstrained quoting loop
+# (Open Issue 005 sub-decision 5h). Measured every quote tick; a breach is a recorded event,
+# not a subjective judgement. These also become market-quality metrics for the Task 7.4
+# benchmark report, where spread, depth and uptime under load say more than throughput alone.
+max_spread_bps = 50
+min_quote_size = 100
+min_two_sided_uptime = 0.95
+
+[bots.noise]
+# Poisson arrivals. Noise traders are retail accounts, so they may only sell what they hold —
+# which makes the market maker's short inventory the exact mirror of theirs, and keeps
+# quantity conservation (Open Issue 004 section 5, invariant 4) true by construction.
+count_per_symbol = 3
+arrivals_per_second = 0.5
+min_qty = 1
+max_qty = 10
+
 [symbols]
 # PROVISIONAL — replaced wholesale by Task 5.1.
 #
