@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "flows": [
+    {
+      "name": "maker_price_and_cancel",
+      "records": [
+        {
+          "type": "submit",
+          "timestamp_ns": 1,
+          "client_order_id": 1,
+          "user_id": 10,
+          "symbol_id": 1,
+          "side": "BUY",
+          "tif": "GTC",
+          "price_ticks": 100,
+          "qty": 5
+        },
+        {
+          "type": "submit",
+          "timestamp_ns": 2,
+          "client_order_id": 2,
+          "user_id": 20,
+          "symbol_id": 1,
+          "side": "SELL",
+          "tif": "GTC",
+          "price_ticks": 90,
+          "qty": 2
+        },
+        {
+          "type": "submit",
+          "timestamp_ns": 3,
+          "client_order_id": 3,
+          "user_id": 11,
+          "symbol_id": 2,
+          "side": "BUY",
+          "tif": "IOC",
+          "price_ticks": 50,
+          "qty": 3
+        },
+        {
+          "type": "cancel",
+          "timestamp_ns": 4,
+          "client_order_id": 4,
+          "user_id": 10,
+          "target_client_order_id": 1
+        }
+      ]
+    },
+    {
+      "name": "fifo_and_symbol_isolation",
+      "records": [
+        {
+          "type": "submit",
+          "timestamp_ns": 1,
+          "client_order_id": 1,
+          "user_id": 10,
+          "symbol_id": 1,
+          "side": "BUY",
+          "tif": "GTC",
+          "price_ticks": 100,
+          "qty": 2
+        },
+        {
+          "type": "submit",
+          "timestamp_ns": 2,
+          "client_order_id": 2,
+          "user_id": 11,
+          "symbol_id": 1,
+          "side": "BUY",
+          "tif": "GTC",
+          "price_ticks": 100,
+          "qty": 2
+        },
+        {
+          "type": "submit",
+          "timestamp_ns": 3,
+          "client_order_id": 3,
+          "user_id": 20,
+          "symbol_id": 1,
+          "side": "SELL",
+          "tif": "IOC",
+          "price_ticks": 90,
+          "qty": 5
+        },
+        {
+          "type": "submit",
+          "timestamp_ns": 4,
+          "client_order_id": 4,
+          "user_id": 21,
+          "symbol_id": 2,
+          "side": "SELL",
+          "tif": "GTC",
+          "price_ticks": 90,
+          "qty": 1
+        }
+      ]
+    }
+  ]
+}
