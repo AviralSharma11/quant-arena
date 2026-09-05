@@ -1,10 +1,12 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-05 · **HEAD** `8b6aa57` · **Week 5** (25 Sep – 1 Oct) — running well ahead
-**State:** Weeks 3 and 4 closed, **5.2b done**. **597 tests pass**, 1 skipped. Nine bot-session
-tests error on this machine: `dmm_qaa` exists in the dev database under a forgotten password —
-a data condition, not code (`docker compose down -v` clears it). Eleven commits on
-`task/4.0-week4-prework`, **not yet pushed** — the whole week goes up as one pull request.
+**Last updated:** 2026-09-05 · **HEAD** `5a31c1b` · **Week 5** (25 Sep – 1 Oct) — running well ahead
+**State:** Weeks 3 and 4 closed, **5.2b done**. Week 4 merged to `main` as `bfd3e86`.
+**617 tests collected**; the 27 engine/model/adapter tests and 233 contract tests pass locally,
+the rest need the compose stores. Nine bot-session tests error on this machine: `dmm_qaa` exists
+in the dev database under a forgotten password — a data condition, not code
+(`docker compose down -v` clears it). **Dev A has reported 1.2, 2.3, 2.4, 3.4 and 4.1 done
+(2026-09-05)**, and the running stack now matches in C++ — integration point 2 landed early.
 A live market runs, and fan-out now serves it: `docker compose up` includes `fanout` on :8001.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
@@ -38,12 +40,13 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
 
 ## Blocked / waiting
 
-- **Five contract questions**, written up as `HANDOFF.md` and awaiting a reply. None blocks
-  Dev B: each is implemented under a stated reading isolated to one function per side. Q2 is
-  the one that matters most — `resumed` amends a frozen document. Q4 (`BookChanged`) is the one
-  that could cost *Dev A* rework, so it wants an answer before 4.2 is built.
-  *(Integration point 1 is passed. The next is end of week 5: the C++ engine process replaces
-  the naive model. Appendix D.2 — expected to be a no-op for fan-out, which is engine-agnostic.)*
+- **All five `HANDOFF.md` contract questions are answered** as of 2026-09-05. Q4 and Q5 by
+  Dev A's code; Q1, Q2 and Q3 by Dev A's reply. Nothing on the browser wire is now open.
+  *(Both integration points are passed. Appendix D.2's engine swap was a no-op for fan-out, as
+  designed — `docker-compose.yml` now runs `services.matcher.cpp_runner`.)*
+- **On Dev A:** **4.2 is reported unfinished.** Its engine process, Redis integration and
+  anchor-based replay recovery are merged (`b644130`) and live in compose, so this blocks
+  nothing — but the task is not closed and integration point 2 is not formally signed off.
 - **On a decision from me:** nothing.
 - **On something external:** nothing. (The iCloud duplicate files cleared in `f729ed3`.)
 
@@ -59,25 +62,25 @@ means something is wrong with the plan, not with the week.*
 | Task | Own | Wk | Status | Evidence / note |
 |---|---|---|---|---|
 | 1.1  Contracts — schema, REST, WS shapes | AB | 1 | done | `1ced47a` built, `a37b49b` frozen · 233 tests pass |
-| 1.2  Naive Python model engine | A | 1 | A:unknown | not yet reported |
-| 2.3  Hand-written matching scenarios (T1) | A | 1 | A:unknown | not yet reported |
+| 1.2  Naive Python model engine | A | 1 | A:done | reported 2026-09-05 · maker-price fix `e8bc8e9` |
+| 2.3  Hand-written matching scenarios (T1) | A | 1 | A:done | reported 2026-09-05 |
 | 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
 | 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
 | 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
-| 2.4  C++ engine — order book and match loop | A | 2 | A:unknown | merged to main as `e4352c1`; not reported by Dev A |
+| 2.4  C++ engine — order book and match loop | A | 2 | A:done | reported 2026-09-05 · `e4352c1`, arrival-order fix `e8bc8e9` |
 | INT1 Stub engine → naive model over the stream | B | 2 | done | `8210d3a` · 21 matcher tests · live restart replayed 26, appended 0 |
 | 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
 | 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
 | 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
-| 3.4  C++ engine complete + nanobind | A | 3 | A:unknown | — |
+| 3.4  C++ engine complete + nanobind | A | 3 | A:done | reported 2026-09-05 · **no nanobind in the repo — see Deviations** |
 | 3.1  Risk checks + in-memory reservations | B | 3 | done | `6c67e01` · sells reserve inventory not cash; `INSUFFICIENT_POSITION` now raised · 5 of 6 criteria; criterion 3 unverified, see Deviations |
 | 3.2  Idempotency — atomic claim-and-append | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 6 of 6 criteria · concurrent burst now yields exactly one order · **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | **half merged** `5efe462` — CI gate, nightly, multi-arch images. Criteria 1 and 3 (HTTPS, one-command redeploy) outstanding; see Deviations |
-| 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:unknown | — |
+| 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:done | reported 2026-09-05 · `2930cb2` · 4 tests, 2 Hypothesis properties at 100 examples |
 | 4.4  Bots — market maker and noise traders | B | 4 | done | `68c7821` · 43 tests · live: 130 fills in 45s, both makers meeting their uptime obligation, units conserved at 0 per symbol |
 | 5.2a Fan-out process begins | B | 4 | done | `0eb5329` · 38 tests · derived book matches the matcher order-for-order across a 400-record sequence; live 706 records recovered |
 | 5.4c WS client, gap detection, rAF loop | B | 4 | done | `78ed4dc` · 26 tests · reconnect re-subscribes, a deliberate private gap triggers exactly one resync; criterion 5 mechanism-verified, profiler check manual |
-| 4.2  Engine process, Redis, replay recovery | A | 5 | A:unknown | — |
+| 4.2  Engine process, Redis, replay recovery | A | 5 | A:todo | reported unfinished 2026-09-05 · `b644130` merged and live in compose |
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
 | 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
@@ -166,6 +169,11 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-05 | `seq` on `private` is a **dense per-user counter**, not the stream id | §3.4's example shows a stream id, which counts every record on the stream and so is dense for nobody — read literally, no private gap is detectable and 5.2's fourth criterion is unmeetable by any implementation | reads §3.4 against §3.5 and OI 006 §7c; HANDOFF Q1 |
 | 2026-09-05 | A market frame for a busy client is **skipped**; a private message is **buffered, then the connection closed** | The droppable/non-droppable distinction at the last hop. The next snapshot supersedes a skipped frame; nothing supersedes a lost fill | implements OI 006's slow-client policy |
 | 2026-09-05 | The gateway **publishes** its halt state to `qa:halt`; fan-out relays it | The halt flag is in gateway memory (OI 004) and fan-out is another process, so nothing could send §3.6's `halted`. Fan-out pinging Redis was rejected — "fan-out can reach Redis" is not "the gateway can durably record orders", and a readable-but-not-writable store separates them in the direction that matters | — |
+| 2026-09-05 | **Q1 answered: `seq` on `private` is the dense per-user counter**, as implemented | Dev A confirmed the reading. §3.4's stream-id example is illustrative and wrong; the counter is what makes 5.2's fourth criterion measurable | closes HANDOFF Q1 |
+| 2026-09-05 | **Q2 answered: `resumed` accepted. Contracts v1 Amendment 1**, agreed by both developers | A halt clears on its own, and the four original codes cannot say so. Additive; `schema_version` **not** bumped — the binary records are untouched, this is the browser wire | amends `contracts/v1/rest_and_ws.md` §3.6 |
+| 2026-09-05 | **Q3 answered: `bars:*` carries `seq`**, as implemented | The rule in §3.5 governs; §3.3's example is abbreviated. A channel without `seq` is the one channel no client could gap-check | closes HANDOFF Q3 |
+| 2026-09-05 | **Q4 answered: the C++ engine emits no `BookChanged`** | `engine/cpp/stream_engine.cpp` enumerates its outputs and the type is absent. Fan-out's derived book stands and the engine swap did not touch it | closes HANDOFF Q4 |
+| 2026-09-05 | **Q5 answered: both engines price at the resting maker** | Dev A's `e8bc8e9` tracks arrival order in the Python model and the C++ book; the adapter's override was removed | closes HANDOFF Q5 |
 | 2026-09-05 | Session lookups use a **blocking** Redis pool | redis-py's default pool *raises* when exhausted: 200 browsers reconnecting at once refused 73 of themselves. A session lookup is one local GET, so queueing is invisible and failing is a dead feed | found by `benchmarks/bench_fanout.py` |
 
 ## Deviations from the plan
@@ -200,6 +208,16 @@ decisions: a schedule deviation is not a design change.
   §3.6 enumerates four codes, all failures, with no way to say a halt has *ended* — while a halt
   clears on its own within one watchdog interval. Additive, so an unknown code is ignorable.
   Implemented and flagged; **needs Dev A's sign-off** (HANDOFF Q2).
+- **Dev A's C++ work uses neither CMake, Catch2 nor nanobind**, all three named in `CLAUDE.md`'s
+  closed stack. What exists: a bare `g++` line in the `Dockerfile`, a hand-rolled
+  `order_book_test.cpp`, and a subprocess/stdin-stdout boundary instead of a binding. Recorded as
+  observed, not judged — 3.4 is Dev A's task and Dev A reported it done.
+- **`engine/cpp/stream_engine.cpp` hand-codes the wire format** rather than including the
+  generated `contracts/v1/generated/contracts.hpp`. Record sizes and field offsets are literals.
+  `generate.py --check` cannot see a drift here; only 4.1's differential tests can. Dev B has
+  asked Dev A to drive the C++ from `schema.toml` instead.
+- **Dev A edited `STATUS.md` and `services/matcher/adapter.py` in `e8bc8e9`**, including replacing
+  a row in the append-only decision log. Noted so the log's history is not silently wrong.
 - **5.2's Criterion 1 was measured on one machine, not a separated topology.** Docker Hub was
   unreachable, so gateway, fan-out, 200 sockets and the harness shared ten cores. The median
   (+4.2%) and the encode counts hold; the p95 and max are pessimistic — re-measure for 7.4.
@@ -227,7 +245,7 @@ that skip has not verified 1.1's Success Criterion 3.
 
 ## Open questions
 
-*(none — the ledger now runs as its own compose service; see the decision log)*
+*(none — all five `HANDOFF.md` contract questions are answered; see the decision log)*
 
 ## Archive
 

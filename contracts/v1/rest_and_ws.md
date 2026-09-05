@@ -4,6 +4,10 @@
 Appendix D.2). The binary record layout is in `schema.toml`; this file is the other half of the
 same contract — the shapes that cross the network to a browser.
 
+**Amendment 1 — 2026-09-05, agreed by Dev A and Dev B.** §3.6 gains a fifth `code`, `resumed`.
+Additive only, and `schema_version` is **not** bumped: the binary records in `schema.toml` are
+untouched, and this is the browser wire. Raised as `HANDOFF.md` Q2.
+
 Sources: Open Issue 016 §5 (REST surface, confirmed complete), Open Issue 008 §9h (response
 codes), Open Issue 006 (fan-out, conflation, tiering), Open Issue 014 (frontend, gap detection),
 Open Issue 015 (sessions).
@@ -178,12 +182,23 @@ record of truth (the archive is).
 ### 3.6 Errors
 
 ```jsonc
-{ "ch": "error", "code": "unauthenticated" | "unknown_channel" | "slow_consumer" | "halted",
+{ "ch": "error", "code": "unauthenticated" | "unknown_channel" | "slow_consumer" | "halted"
+                       | "resumed",
   "detail": "…" }
 ```
 
 `slow_consumer` precedes a server-initiated close, so a stalled browser tab cannot apply
 back-pressure to the fan-out process.
+
+`resumed` (**Amendment 1**) is the one code on this channel that is not a failure: it says a halt
+has **ended** and the exchange is accepting orders again. It exists because a halt clears on its
+own within one watchdog interval (Task 2.1, Success Criterion 5), and the four original codes
+give no way to say so — leaving a HALTED indicator on screen over a working exchange for as long
+as the tab stays open. Neither alternative works: market data keeps flowing *throughout* a halt,
+since only the appending of new orders stops, so resumption cannot be inferred from data
+arriving; and inferring it from the absence of further `halted` frames turns the indicator into
+a timeout. The code is additive, so a client that does not recognise it ignores an error it
+cannot classify — which is what this section's shape already asks of clients.
 
 ---
 
