@@ -73,8 +73,7 @@ def test_two_crossing_orders_produce_exactly_one_fill():
 def test_the_fill_prints_the_resting_price_when_the_seller_aggresses():
     """The frozen schema: `Fill.price_ticks` is *always* the resting (maker) price.
 
-    Dev A's `naive_model.match()` returns the ask price unconditionally, which is the taker's
-    price in this direction. The adapter reprices to the maker; see its module docstring.
+    The seller's lower limit must not replace the higher price of the resting bid.
     """
     m = NaiveMatcher()
     m.apply(submit(coid=1, user=10, side=BUY, price=100, qty=5, ts=1))

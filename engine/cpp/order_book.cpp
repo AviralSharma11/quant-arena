@@ -45,6 +45,7 @@ void OrderBook::add_order(const Order& order) {
     }
 
     orders_by_id_.emplace(order.order_id, order);
+    arrival_sequence_.emplace(order.order_id, next_arrival_sequence_++);
 
     if (order.side == Side::Buy) {
         auto level_it = bids_.find(order.price);
@@ -88,6 +89,7 @@ std::optional<Order> OrderBook::remove_order(long long order_id) {
     }
 
     orders_by_id_.erase(it);
+    arrival_sequence_.erase(order_id);
     return removed;
 }
 
@@ -229,7 +231,11 @@ std::vector<Fill> OrderBook::match() {
         Order& ask_order = ask_it->second;
 
         long long trade_qty = std::min(bid_order.remaining_quantity, ask_order.remaining_quantity);
-        Fill fill{bid_order.order_id, ask_order.order_id, ask_order.symbol, ask_order.price, trade_qty};
+        const auto bid_arrival = arrival_sequence_.at(bid_order.order_id);
+        const auto ask_arrival = arrival_sequence_.at(ask_order.order_id);
+        const long long maker_price =
+            bid_arrival < ask_arrival ? bid_order.price : ask_order.price;
+        Fill fill{bid_order.order_id, ask_order.order_id, ask_order.symbol, maker_price, trade_qty};
         fills.push_back(fill);
 
         bid_order.reduce(trade_qty);

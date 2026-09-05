@@ -110,19 +110,14 @@ expected.
 
 ---
 
-## 2. One defect in your code, reported and not fixed
+## 2. Maker-price defect — fixed
 
-**`naive_model.match()` prints the taker's price when the seller aggresses.** The frozen schema
-requires the resting (maker) price — `schema.toml`, `Fill.price_ticks`, "always the resting
-(maker) price".
+The matching engines now print the resting (maker) price, including when a seller aggresses into a
+higher resting bid. Both the Python reference model and C++ order book track arrival order and have
+regression coverage for this case.
 
-It is your file, so I have not touched it. What I did instead: `services/matcher/adapter.py`
-discards `naive_model`'s price and emits the maker's, which is why the exchange is correct today
-while the model is not. Recorded in the decision log as of 2026-09-02.
-
-**Why it matters to you specifically:** Task 4.1's differential tests compare your C++ engine
-against the naive model. If the model still has this when you run them, the two will disagree on
-every seller-aggressing trade, and the disagreement will look like an engine bug.
+The matcher adapter now passes through the corrected model price, so the Python reference, active
+matcher, and C++ implementation share the same execution-price semantics.
 
 ---
 

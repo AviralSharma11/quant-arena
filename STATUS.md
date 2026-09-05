@@ -38,10 +38,7 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
 
 ## Blocked / waiting
 
-- **On Dev A:** `naive_model.match()` prints the taker's price when the seller aggresses; the
-  frozen schema requires the resting (maker) price. Reported, not fixed — Dev A's file. Task
-  4.1's differential tests will disagree here until it lands.
-  Also **five contract questions**, written up as `HANDOFF.md` and awaiting a reply. None blocks
+- **Five contract questions**, written up as `HANDOFF.md` and awaiting a reply. None blocks
   Dev B: each is implemented under a stated reading isolated to one function per side. Q2 is
   the one that matters most — `resumed` amends a frozen document. Q4 (`BookChanged`) is the one
   that could cost *Dev A* rework, so it wants an answer before 4.2 is built.
@@ -147,7 +144,7 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-08-31 | Frontend stays out of `docker-compose.yml` | 1.4 is closed and deployment is 3.3's. The Vite dev server runs on the host against the containerised gateway | — |
 | 2026-09-02 | Recovery counts **anchors** — one outbound record per inbound record — instead of a checkpoint | A replay that re-appended its outbound records would duplicate fills that moved real positions. No snapshot (OI 018 §13.1) and no field added to a frozen schema | implements OI 018 §13.1 |
 | 2026-09-02 | The matcher holds **one book per `symbol_id`** | `naive_model.OrderBook.match()` crosses on price alone; a single book would trade symbol 3 against symbol 7 | — |
-| 2026-09-02 | The adapter emits the **maker's** price, discarding `naive_model`'s | `schema.toml` says `Fill.price_ticks` is always the resting price, and contracts v1 is frozen | flags a defect in Dev A's 1.2 |
+| 2026-09-05 | Both matching engines use the **resting maker's** price | Arrival sequence is tracked explicitly, covering a seller crossing a higher resting bid; Python, C++ and adapter regression tests agree | resolves the maker-price defect |
 | 2026-09-02 | `StubEngine`, `engine_port.py` and the `Engine` dependency deleted | The seam CLAUDE.md asked to keep behind a thin interface is now the stream itself | closes the one load-bearing stub, Appendix D.2 |
 | 2026-09-02 | One image for gateway and matcher; `engine/` un-ignored in `.dockerignore` | They differ only in their command, so one image means they cannot drift onto different dependency sets. `engine/cpp` stays excluded — nothing in the image compiles it | — |
 | 2026-09-02 | `IdempotencyStore.claim()` reports **which caller won the key** | The Lua claim was always atomic, but the route collapsed "I claimed it" and "someone else holds it, in flight" into one status and submitted in both cases. That distinction is the whole of Success Criterion 3.2.2 | — |
