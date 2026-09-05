@@ -88,9 +88,8 @@ services:
     # Its own process, not a thread in the gateway. The gateway is the single *producer* of
     # the inbound stream and must stay answerable to HTTP (Open Issue 007); matching is a
     # single-writer loop with no request attached to it, and coupling them would make a slow
-    # match a slow API. At the week-5 integration point this is where the C++ engine process
-    # takes over from the naive model (Appendix D.2).
-    command: ["python", "-m", "services.matcher"]
+    # match a slow API. Redis durability and recovery stay in Python; matching runs in C++.
+    command: ["python", "-m", "services.matcher.cpp_runner"]
     depends_on:
       redis:
         condition: service_healthy
@@ -98,6 +97,7 @@ services:
       # No QA_DATABASE_URL: the matcher never touches PostgreSQL. The engine is money-blind
       # (Open Issue 001) and the read model is the ledger's, not the matcher's.
       QA_REDIS_URL: redis://redis:6379/0
+      QA_CPP_ENGINE_PATH: /usr/local/bin/quant-arena-engine
     # The matcher has no HTTP surface, so liveness is "the process is up and can still reach
     # the log it consumes". It deliberately does not assert that the matcher is *caught up* —
     # a container healthcheck cannot see the consumer's position, and a lag alarm belongs with

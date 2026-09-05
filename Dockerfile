@@ -1,6 +1,17 @@
-# The Python service image, shared by the gateway and the matcher — they differ only in their
-# command, and one image means they cannot drift onto different dependency sets. One stage: the dependency set is small and there is nothing to compile,
-# so a builder stage would add moving parts without saving meaningful size.
+# The Python service image, shared by the gateway and matcher. The C++ matcher is compiled in a
+# separate stage so the runtime image does not need a compiler.
+FROM debian:bookworm-slim AS engine-builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY engine/cpp/ ./engine/cpp/
+RUN g++ -std=c++20 -O2 -Wall -Wextra -Werror \
+    -o /quant-arena-engine \
+    engine/cpp/order_book.cpp engine/cpp/stream_engine.cpp
+
 FROM python:3.13-slim
 
 # PYTHONUNBUFFERED matters here specifically: without it the startup line carrying the
@@ -14,6 +25,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 RUN adduser --system --group --no-create-home quant
+COPY --from=engine-builder /quant-arena-engine /usr/local/bin/quant-arena-engine
 
 # Dependencies first, so editing source does not invalidate the pip layer.
 COPY requirements.txt ./

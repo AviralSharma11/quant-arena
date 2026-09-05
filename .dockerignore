@@ -7,9 +7,7 @@ __pycache__
 .hypothesis
 tests
 web
-# engine/ carries Dev A's naive model, which the matcher process imports. Only the C++
-# sources are excluded: nothing in the image compiles them.
-engine/cpp
+# engine/ carries both the Python reference model and the C++ sources used by the builder stage.
 open-issues
 *.md
 !services/gateway/README.md
