@@ -148,6 +148,43 @@ services:
       retries: 12
       start_period: 10s
 
+  fanout:
+    build: .
+    restart: unless-stopped
+    # A separate process, and that is a settled decision rather than a deployment convenience:
+    # Open Issue 006 sub-decision 7b says coupling fan-out to the sequencer degrades order
+    # acknowledgement latency under connection load, and two hundred WebSocket connections is
+    # exactly that load. Task 5.2's Boundaries repeat it.
+    command: ["python", "-m", "services.fanout"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      # The gateway, only for the halt key it publishes (`qa:halt`). Fan-out runs perfectly
+      # well without it — an absent key reads as `gateway_unreachable`, which is true — but
+      # starting after it means the browser is not shown a halt during a normal boot.
+      gateway:
+        condition: service_healthy
+    environment:
+      QA_REDIS_URL: redis://redis:6379/0
+      # No QA_DATABASE_URL: fan-out derives everything from the stream and never reads the
+      # PostgreSQL read model. Sessions are in Redis (Open Issue 015), so authentication needs
+      # no database either.
+    ports:
+      - "8001:8001"
+    # Unlike the matcher and the ledger, this one has an HTTP surface, so liveness is a real
+    # question rather than "the process is up": /health carries the stream position and the
+    # tick count, which is what says the feed is actually moving.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).status == 200 else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   bots:
     build: .
     restart: unless-stopped

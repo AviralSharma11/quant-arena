@@ -16,8 +16,11 @@ export default defineConfig({
       "/portfolio": { target: "http://localhost:8000", changeOrigin: true },
       "/backtests": { target: "http://localhost:8000", changeOrigin: true },
       "/health": { target: "http://localhost:8000", changeOrigin: true },
-      // 5.4c connects the WebSocket here; the gateway hands it to fan-out from 5.2b.
-      "/stream": { target: "ws://localhost:8000", ws: true },
+      // Straight to fan-out on its own port, NOT through the gateway. Open Issue 006 §7b and
+      // Task 5.2's Boundaries both say fan-out must not run inside the gateway, and proxying
+      // two hundred WebSocket connections through it would recreate exactly the connection
+      // load that decision exists to keep off the order path.
+      "/stream": { target: "ws://localhost:8001", ws: true },
     },
   },
 });

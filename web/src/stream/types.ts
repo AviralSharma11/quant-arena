@@ -76,7 +76,9 @@ export interface PrivateMessage extends Envelope {
 /** §3.6. `slow_consumer` precedes a server-initiated close. */
 export interface ErrorMessage {
   ch: "error";
-  code: "unauthenticated" | "unknown_channel" | "slow_consumer" | "halted";
+  // `resumed` is Task 5.2b's addition. §3.6 enumerates only failures, so a halt had no way
+  // to end — see `services/fanout/messages.py`. Pending Dev A's sign-off on the contract.
+  code: "unauthenticated" | "unknown_channel" | "slow_consumer" | "halted" | "resumed";
   detail: string;
 }
 

@@ -47,6 +47,58 @@ def width_label(bucket_seconds: int) -> str:
     return _WIDTH_SUFFIX.get(bucket_seconds, f"{bucket_seconds}s")
 
 
+def known_channels(symbols, bar_widths) -> set[str]:
+    """Every channel name a client may subscribe to.
+
+    Built from the configuration rather than pattern-matched, so `unknown_channel` (§3.6) is
+    answered by comparing against a set instead of by parsing — which means a typo in a symbol
+    name is refused rather than silently subscribing a client to a feed that never sends.
+
+    `private` is not in here. §3 is explicit that the private stream is whatever the session
+    owns and never a channel the client asks for by name.
+    """
+    channels: set[str] = set()
+    for symbol in symbols:
+        channels.add(f"book:{symbol.name}:l1")
+        channels.add(f"book:{symbol.name}:l2")
+        channels.add(f"tape:{symbol.name}")
+        for width in bar_widths:
+            channels.add(f"bars:{symbol.name}:{width_label(width)}")
+    return channels
+
+
+def halted(reason: str | None, detail: str | None) -> dict:
+    """§3.6's `halted`. The exchange cannot durably record orders; the socket is fine.
+
+    Distinct from every other error code here in that it says nothing about this connection —
+    which is why `web/src/stream/client.ts` renders it as a connection *state* rather than
+    logging it and carrying on showing a confident green indicator over an exchange that is
+    refusing orders.
+    """
+    return {"ch": "error", "code": "halted", "detail": detail or reason or "exchange halted"}
+
+
+def resumed() -> dict:
+    """The halt lifting.
+
+    **A deviation from the frozen contract, and it needs Dev A's sign-off.** §3.6 enumerates
+    four codes — `unauthenticated`, `unknown_channel`, `slow_consumer`, `halted` — all of them
+    failures, and provides no way at all to say that a halt has ended.
+
+    Something has to. A halt clears on its own within one watchdog interval (Task 2.1 Success
+    Criterion 5), so an indicator that could only be reset by reconnecting would show HALTED
+    over a working exchange for as long as the tab stayed open. The two alternatives are worse:
+    inferring resumption from the arrival of market data is simply wrong, because market data
+    keeps flowing throughout a halt — fan-out is still reading a stream the matcher is still
+    draining, and it is only the *appending* of new orders that stopped — and inferring it from
+    the *absence* of repeated `halted` frames makes the indicator a timeout.
+
+    Additive, so it is the smallest possible change: a client that does not know this code
+    ignores an error it cannot classify, which is what §3.6's shape already asks of it.
+    """
+    return {"ch": "error", "code": "resumed", "detail": "exchange accepting orders"}
+
+
 def book_l2(symbol: Symbol, book: Book, *, depth: int, seq: str, ts_ns: int) -> dict:
     """A **complete** top-`depth` snapshot of both sides.
 

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SERVICES = ("redis", "postgres", "gateway", "matcher", "ledger")
+SERVICES = ("redis", "postgres", "gateway", "matcher", "ledger", "fanout")
 
 #: Environment keys the gateway container is allowed to receive. Everything else belongs in
 #: config/quant_arena.toml — see the boundary in Task 1.4.
@@ -37,11 +37,13 @@ def compose() -> dict:
     return json.loads(result.stdout)
 
 
-def test_the_stack_is_the_stores_and_the_three_python_processes(compose: dict):
-    """One producer, one matcher, one projection — and no fourth thing that crept in.
+def test_the_stack_is_the_stores_and_the_four_python_processes(compose: dict):
+    """One producer, one matcher, one projection, one feed — and nothing that crept in.
 
     The ledger became a service in week 4. `LedgerConsumer` had existed since Task 2.2 and
     was started by nothing, so the read model was proven correct and never actually run.
+    Fan-out arrived in 5.2b, when it finally had a port to expose — 5.2a deliberately shipped
+    no service, on the grounds that a container serving nobody does nothing observable.
     """
     assert set(compose["services"]) == set(SERVICES)
 

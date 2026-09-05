@@ -24,6 +24,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from redis.asyncio import Redis
 
@@ -45,10 +47,16 @@ class FanOut:
         state: MarketState | None = None,
         batch_size: int = 100,
         poll_block_ms: int = 200,
+        on_record: Callable[[Any, str], None] | None = None,
     ) -> None:
         self.redis = redis
         self.settings = settings
         self.state = state or MarketState(bar_widths=settings.bar_bucket_seconds)
+        #: Called with `(record, stream_id)` for each record read while *live*, and never
+        #: during `recover()`. Task 5.2b hangs the private stream off it: a replay from `0-0`
+        #: is history, and re-delivering thousands of stale fills to a user who has just
+        #: connected is worse than the gap it would be trying to close.
+        self.on_record = on_record
         # 100 per read: measured at 8.32 µs per record against 159.11 µs at a count of one
         # (benchmarks/results/2.1-stream-durability.md). Every consumer in the system uses it.
         self.batch_size = batch_size
@@ -86,6 +94,10 @@ class FanOut:
         )
         for item in batch:
             self.state.apply(item.record, stream_id=item.stream_id)
+            if self.on_record is not None:
+                # Inside the loop and not after it, so a private message is built from the
+                # state as of its own record rather than as of the end of the batch.
+                self.on_record(item.record, item.stream_id)
         return len(batch)
 
     async def run(self) -> None:

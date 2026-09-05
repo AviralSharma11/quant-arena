@@ -21,6 +21,7 @@ Three things live here:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -44,6 +45,28 @@ class HaltReason:
     #: The producer loop is not running, so nothing can be appended. Distinct from Redis being
     #: unreachable: the store may be perfectly healthy and the gateway still unable to record.
     PRODUCER_STOPPED = "producer_stopped"
+    #: Nobody is publishing a halt state. Read by *other* processes, never set by the gateway
+    #: on itself — a gateway that can run this line is by definition reachable.
+    GATEWAY_UNREACHABLE = "gateway_unreachable"
+
+
+#: Where the gateway publishes its halt state for other processes to read.
+#:
+#: The halt flag lives in gateway process memory (Open Issue 004: risk state is not in Redis),
+#: which is right for the order path and useless to anyone else — fan-out is a separate process
+#: and cannot see it. Task 5.2b needs it: `contracts/v1/rest_and_ws.md` §3.6 gives the browser a
+#: `halted` frame, and until this key existed nothing could ever send one.
+#:
+#: Published rather than inferred, deliberately. Fan-out could ping Redis itself and call that a
+#: halt, but "fan-out can reach Redis" is a different claim from "the gateway can durably record
+#: orders" — they come apart in both directions, and the dangerous one is a store that is
+#: readable but not writable, where the reads succeed while the exchange is halted.
+HALT_KEY = "qa:halt"
+
+#: The key is refreshed every poll and expires after this many intervals. An absent key
+#: therefore means "no gateway is publishing", which is itself a halt — see
+#: `services/fanout/halt.py`, which is what reads this.
+HALT_KEY_TTL_INTERVALS = 3
 
 
 @dataclass
@@ -267,14 +290,27 @@ async def read_records(
 
 
 async def watch_health(
-    redis: Redis, halt: HaltState, *, poll_ms: int, stop: asyncio.Event | None = None
+    redis: Redis,
+    halt: HaltState,
+    *,
+    poll_ms: int,
+    stop: asyncio.Event | None = None,
+    publish_key: str | None = HALT_KEY,
 ) -> None:
     """Ping Redis on an interval, halting and un-halting as it goes away and comes back.
 
     Success Criterion 5 — "restarting Redis clears the halt state without a gateway restart" —
     is this loop. A halt set only when an order happens to fail would never lift on its own.
+
+    It also publishes the resulting state to `publish_key` so that processes outside the
+    gateway can see it. This loop rather than a second one because the two would otherwise
+    poll the same Redis on the same interval to answer the same question, and could disagree.
+
+    The publish is best-effort by construction: if Redis is unreachable the write fails too,
+    the key expires, and a reader sees the absence — which is the correct conclusion anyway.
     """
     interval = poll_ms / 1000
+    ttl_ms = max(1, int(poll_ms * HALT_KEY_TTL_INTERVALS))
     while stop is None or not stop.is_set():
         try:
             await redis.ping()
@@ -285,4 +321,25 @@ async def watch_health(
         else:
             if halt.halted:
                 halt.clear()
+        if publish_key is not None:
+            await publish_halt(redis, halt, key=publish_key, ttl_ms=ttl_ms)
         await asyncio.sleep(interval)
+
+
+async def publish_halt(
+    redis: Redis, halt: HaltState, *, key: str = HALT_KEY, ttl_ms: int
+) -> bool:
+    """Write the halt state where another process can read it. True if it landed.
+
+    JSON, not a packed record: this is not a stream entry and it is not part of the frozen
+    schema. It is one process telling another what it currently thinks, expiring on its own if
+    that process stops thinking.
+    """
+    payload = json.dumps(halt.as_dict(), separators=(",", ":")).encode()
+    try:
+        await redis.set(key, payload, px=ttl_ms)
+    except (RedisError, *UNREACHABLE):
+        # Nothing to do and nothing to log at volume — this runs twice a second, and the
+        # reader's timeout already says everything a log line would.
+        return False
+    return True

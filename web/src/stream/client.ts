@@ -186,7 +186,13 @@ export class StreamClient {
       // `halted` is the exchange saying it cannot durably record orders (Open Issue 003 §8.5).
       // The socket is fine; the venue is not, and the indicator must say so rather than show
       // a confident "connected" over prices nobody can trade on.
+      //
+      // `resumed` is 5.2b's addition to §3.6, which enumerates only failures and so gave a
+      // halt no way to end. Without it the indicator could be cleared only by reconnecting,
+      // and a halt lifts on its own within one watchdog interval — market data keeps flowing
+      // throughout, so there is nothing else to infer it from. Pending Dev A's sign-off.
       if (error.code === "halted") this.setState("halted");
+      else if (error.code === "resumed" && this.state === "halted") this.setState("connected");
       return;
     }
 

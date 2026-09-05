@@ -29,7 +29,7 @@ from contracts.v1.generated.contracts import (
     OrderCancelled,
     Side,
 )
-from services.fanout.bars import BarSet, Tape, Trade
+from services.fanout.bars import Bar, BarSet, Tape, Trade
 from services.fanout.book import Book
 
 BUY, SELL = int(Side.BUY), int(Side.SELL)
@@ -45,6 +45,14 @@ class MarketState:
         self.tape = Tape()
         self.last_seq: str = "0-0"
         self.records_applied = 0
+        #: Symbols whose book moved since the tick last looked. The conflation tick serialises
+        #: these and nothing else — a symbol nobody traded does not need re-encoding twenty
+        #: times a second just because the clock advanced (Task 5.2 Success Criterion 5).
+        self.dirty: set[int] = set()
+        #: Bars that closed since the last drain. `BarSet.add` returns them and 5.2a discarded
+        #: them; they are published on close (§3.3), so they have to be kept until the tick
+        #: that sends them.
+        self.closed_bars: list[Bar] = []
 
     # -- accessors, which create on first sight -------------------------------------------------
 
@@ -75,6 +83,7 @@ class MarketState:
         self.records_applied += 1
 
         if isinstance(record, OrderAccepted):
+            self.dirty.add(record.symbol_id)
             self.book(record.symbol_id).accept(
                 order_id=record.order_id,
                 side=int(record.side),
@@ -84,6 +93,7 @@ class MarketState:
             return
 
         if isinstance(record, Fill):
+            self.dirty.add(record.symbol_id)
             book = self.book(record.symbol_id)
             # Both sides. The taker was accepted onto the book before it matched, so a fill
             # reduces the resting maker and the aggressor alike — see book.py.
@@ -98,19 +108,31 @@ class MarketState:
                 timestamp_ns=record.timestamp_ns,
                 seq=stream_id or self.last_seq,
             ))
-            self.bar_set(record.symbol_id).add(
-                price_ticks=record.price_ticks,
-                qty=record.qty,
-                timestamp_ns=record.timestamp_ns,
+            self.closed_bars.extend(
+                self.bar_set(record.symbol_id).add(
+                    price_ticks=record.price_ticks,
+                    qty=record.qty,
+                    timestamp_ns=record.timestamp_ns,
+                )
             )
             return
 
         if isinstance(record, OrderCancelled):
+            self.dirty.add(record.symbol_id)
             # Covers a user cancellation and an expired IOC remainder alike. The distinction
             # matters to the ledger and to the matcher's anchor count; to the book, an order
             # leaving is an order leaving.
             self.book(record.symbol_id).cancel(record.order_id)
             return
+
+    def drain_dirty(self) -> set[int]:
+        """Symbols changed since the last call, and clears the set."""
+        changed, self.dirty = self.dirty, set()
+        return changed
+
+    def drain_closed_bars(self) -> list[Bar]:
+        closed, self.closed_bars = self.closed_bars, []
+        return closed
 
     def flush_bars(self) -> None:
         """Close every open bar. For the end of a replay, where no later trade is coming."""

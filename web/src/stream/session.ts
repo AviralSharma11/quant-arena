@@ -11,18 +11,23 @@ import { StreamClient } from "./client.ts";
 import { MockStreamSocket } from "./mock.ts";
 import type { ConnectionState } from "./types.ts";
 
-/** The symbols the mock quotes. Task 5.1 replaces the provisional pair; `GET /symbols` is the
+/** The symbols subscribed to. Task 5.1 replaces the provisional pair; `GET /symbols` is the
  *  real source, which Task 6.1 will read when the trading screen needs tick sizes. */
-export const MOCK_SYMBOLS = ["QAA", "QAB"];
+export const STREAM_SYMBOLS = ["QAA", "QAB"];
+
+/** @deprecated Kept because 5.4c's tests import it by this name. */
+export const MOCK_SYMBOLS = STREAM_SYMBOLS;
 
 /**
- * True until Task 5.2b serves `/stream`.
+ * False from Task 5.2b, which serves `/stream` from `services/fanout`.
  *
  * A build-time flag rather than a runtime probe: a client that tried the real socket and fell
  * back to a mock on failure would silently show invented prices whenever the exchange was down,
- * which is the one thing Open Issue 014 §14e says a trading interface must never do.
+ * which is the one thing Open Issue 014 §14e says a trading interface must never do. Flipping
+ * it back is how the frontend is developed with no stack running, and it is what the mock is
+ * still for — that, and being the only practical way to *make* a sequence gap happen.
  */
-export const USE_MOCK_STREAM = true;
+export const USE_MOCK_STREAM = false;
 
 export interface StreamSession {
   buffer: MarketBuffer;
@@ -37,7 +42,7 @@ export function startStreamSession(options: {
   onResync?: () => void | Promise<void>;
 }): StreamSession {
   const buffer = new MarketBuffer();
-  const channels = MOCK_SYMBOLS.flatMap((symbol) => [
+  const channels = STREAM_SYMBOLS.flatMap((symbol) => [
     `book:${symbol}:l2`,
     `tape:${symbol}`,
   ]);
@@ -51,7 +56,7 @@ export function startStreamSession(options: {
     onResync: options.onResync,
     socketFactory: USE_MOCK_STREAM
       ? () => {
-          mock = new MockStreamSocket({ symbols: MOCK_SYMBOLS });
+          mock = new MockStreamSocket({ symbols: STREAM_SYMBOLS });
           // The handshake completes on the next turn of the event loop, so the caller has
           // finished wiring `onopen` before it fires — which is how a real socket behaves.
           const socket = mock;

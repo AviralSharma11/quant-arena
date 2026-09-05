@@ -1,8 +1,8 @@
 # Fan-out — market data derived from the outbound stream
 
-Task 5.2a. This half builds the **state and the message shapes**; Task 5.2b adds the WebSocket
-server, subscription filtering, the 20 Hz conflation tick, the private per-user stream and the
-slow-client policy.
+Task 5.2, both halves. **5.2a** built the state and the message shapes; **5.2b** added the
+WebSocket server, subscription filtering, the 20 Hz conflation tick, the private per-user stream,
+the slow-client policy and the halt relay.
 
 Open Issue 006 §1 frames the whole task as arithmetic rather than engineering:
 
@@ -15,16 +15,32 @@ orders/sec the engine is idle and fan-out saturates first.
 
 ---
 
-## What "done" means for 5.2a
+## The files
 
-None of Task 5.2's five success criteria can be met by this half — every one of them needs the
-WebSocket server, so all five land in 5.2b. Recorded here so that 5.2a is not marked complete on
-the strength of nothing. What this half is judged on instead:
+| File | What it owns |
+|---|---|
+| `book.py` `bars.py` `state.py` | pure derivation from the stream — no clock, no socket, no Redis |
+| `messages.py` | every wire shape, and the channel registry |
+| `runner.py` | the stream tail, and recovery by full replay from `0-0` |
+| `subscribers.py` | who is connected, and what is declined to whom |
+| `conflation.py` | the 20 Hz tick — the one place market data leaves this process |
+| `private.py` | the per-user stream and its dense sequence |
+| `halt.py` | reading the halt state the gateway publishes |
+| `server.py` | `/stream`, `/health`, and the loops |
 
-1. A book rebuilt from the outbound stream alone matches the matcher's own book, order for order.
-2. Killing the process and replaying from `0-0` reproduces identical book, tape and bar state.
-3. Every message shape matches `contracts/v1/rest_and_ws.md` §3.2–3.3, asserted field by field.
-4. Bars close on the right boundaries and their OHLCV is arithmetically correct.
+## Where each success criterion is proved
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | 200+ clients, no measurable ack degradation | `benchmarks/results/5.2-fanout-conflation.md` — median 3.50 → 3.65 ms |
+| 2 | a slowed client gets fewer frames and affects no other | `tests/fanout/test_conflation.py` |
+| 3 | reconnect recovers the full book from the next snapshot | `tests/fanout/test_stream_server.py` |
+| 4 | a private-stream gap is detectable from its sequence | `tests/fanout/test_private.py`, through the shipped TypeScript tracker |
+| 5 | serialisation once per symbol per tick | `Hub.serialisations` — 400 encodes at 1, 50 and 200 clients |
+
+5.2a could meet none of these on its own, so it was judged on its own four instead: the derived
+book matching the matcher's order for order, replay reproducing identical state, message shapes
+matching §3.2–3.3 field by field, and bars closing on the right boundaries. All still hold.
 
 ---
 
@@ -89,22 +105,61 @@ identically. The width comes from `market_data.bar_bucket_seconds`.
 
 ---
 
-## One question for Dev A, before 5.2b
+### 5. `seq` on `private` is a dense per-user counter
 
-`rest_and_ws.md` §3.5 states the rule that **every** message carries `seq`, and the client tracks
-the last one per channel to detect a gap. But the bar example in §3.3 shows no `seq` and no
-`ts_ns`.
+§3.4's example shows `"seq": "1693526400000-9"`, a Redis stream id. §3.5 requires the client to
+detect a gap from `seq`, and Open Issue 006 §7c says private messages carry a per-user sequence
+number precisely so that a gap *is* detectable.
 
-Read as an abbreviated example rather than a contradiction, `seq` is included here — a channel
-that omitted it would be the one channel a client could not gap-check. It is worth confirming
-rather than assuming, since the contract is frozen and this is a shape both sides will code
-against.
+Both cannot be literal. Stream ids count every record on the stream, most of which concern other
+users, so they are dense for nobody — under the §3.4 reading no private gap is detectable and
+Success Criterion 4 cannot be met by any implementation. So `private.py` stamps a dense integer,
+one per message delivered to that user, which is what `web/src/stream/gaps.ts` already assumed.
+
+> **Revisit when:** Dev A answers. The reading is isolated in `PrivateRouter.next_seq` on this
+> side and in `privateSequence()` on the client, so it is one function each.
 
 ---
 
-## No compose service until 5.2b
+## Two open items with Dev A
 
-A container that maintains order books and serves nothing to anybody is a container that does
-nothing observable. The process and its entry point exist (`python -m services.fanout`) and can be
-run by hand against the live stack, which is how this half is verified; the compose service
-arrives with the port it needs to expose.
+Both are contract questions rather than design choices, and both are answerable in one message.
+
+1. **Does a `bars:*` message carry `seq`?** §3.5 says every message does; the §3.3 example omits
+   it. Read here as an abbreviated example, since a channel without `seq` would be the one
+   channel a client could not gap-check.
+2. **`resumed` is a fifth error code, and it is a deviation from the frozen contract.** §3.6
+   enumerates `unauthenticated`, `unknown_channel`, `slow_consumer` and `halted` — all failures,
+   with no way to say a halt has *ended*. Something has to: a halt clears on its own within one
+   watchdog interval (Task 2.1 Success Criterion 5), so an indicator that could only be reset by
+   reconnecting would show HALTED over a working exchange for as long as the tab stayed open.
+   Inferring resumption from market data is simply wrong — market data keeps flowing throughout a
+   halt, because it is only the *appending* of new orders that stopped. The addition is the
+   smallest available: a client that does not know the code ignores an error it cannot classify.
+
+## The halt relay
+
+`contracts/v1/rest_and_ws.md` §3.6 gives the browser a `halted` frame and `web/src/stream/
+client.ts` has rendered it since 5.4c, but until this task **nothing could send one**. The halt
+flag is a plain object in gateway process memory (Open Issue 004 keeps risk state out of Redis),
+and fan-out is a different process.
+
+So the gateway publishes it — `services/gateway/streams.py` `HALT_KEY`, written by the watchdog
+that was already polling — and `halt.py` reads it. Fan-out pinging Redis itself would have been
+cheaper and would have been a different claim: "fan-out can reach Redis" is not "the gateway can
+durably record orders", and the two come apart in the direction that matters when a store is
+readable but not writable.
+
+An absent key is itself a halt. With nothing publishing, no order can be recorded — and it
+clears on its own within one poll of the gateway returning.
+
+## Running it
+
+    docker compose up -d                    # fanout is a service from 5.2b, port 8001
+    curl localhost:8001/health              # stream position, ticks, subscribers, serialisations
+
+    QA_REDIS_URL=redis://localhost:6379/0 python -m services.fanout    # or by hand
+
+The Vite dev proxy sends `/stream` **straight to port 8001**, not through the gateway. Proxying
+two hundred WebSocket connections through the gateway would recreate exactly the connection load
+Open Issue 006 §7b exists to keep off the order path.

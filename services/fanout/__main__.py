@@ -1,34 +1,28 @@
 """Run fan-out as its own process: `python -m services.fanout`.
 
 Never inside the gateway. Open Issue 006 §7b is explicit: coupling fan-out to the sequencer
-degrades order-acknowledgement latency under connection load, and the gateway must stay
-answerable to HTTP while this tails a stream and rebuilds books.
-
-**No compose service until Task 5.2b.** A container that maintains order books and serves them
-to nobody is a container doing nothing observable, so the entry point exists to be run by hand
-against the live stack — which is how this half is verified — and the service arrives with the
-port it needs to expose.
+degrades order-acknowledgement latency under connection load, and two hundred WebSocket
+connections is precisely that load. The gateway must stay answerable to HTTP while this tails a
+stream, rebuilds books and talks to browsers.
 
     QA_REDIS_URL=redis://localhost:6379/0 python -m services.fanout
+
+Everything — the stream tail, the 20 Hz tick, the halt watcher, the WebSocket server — runs in
+one event loop inside `services/fanout/server.py`; this file is uvicorn and a port.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
-import signal
+import os
 import sys
 
-from redis.asyncio import Redis
+import uvicorn
 
-from config.settings import settings as default_settings
-from config.startup import log_startup
-from services.fanout.runner import FanOut, LOGGER_NAME
+from services.fanout.server import create_app
 
-#: How often the book state is printed while running. Structured logs and offline analysis are
-#: the whole of the observability story (Open Issue 012) — there is no Prometheus to scrape.
-SNAPSHOT_INTERVAL_SECONDS = 5.0
+#: Its own port, not the gateway's. The Vite dev proxy and the compose service both point here.
+DEFAULT_PORT = 8001
 
 
 def _configure_logging() -> None:
@@ -40,54 +34,19 @@ def _configure_logging() -> None:
     root.setLevel(logging.INFO)
 
 
-async def _until_signalled() -> None:
-    """SIGTERM as well as SIGINT — `docker compose stop` sends the first, and its default
-    handler ends the process before any final summary can be written."""
-    stopping = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(signum, stopping.set)
-    await stopping.wait()
-
-
-async def main() -> None:
-    settings = default_settings
+def main() -> None:
     _configure_logging()
-    # Task 1.4 criterion 3: the configuration hash appears in every process's startup log, so a
-    # recorded feed and the exchange that produced it are provably the same configuration.
-    log_startup("fanout", settings)
-
-    # decode_responses=False: stream entries carry packed fixed-width records, and decoding
-    # them as text would corrupt the money path silently.
-    redis = Redis.from_url(settings.redis_url, decode_responses=False)
-    fanout = FanOut(redis, settings)
-
-    replayed = await fanout.recover()
-    logging.getLogger(LOGGER_NAME).info(
-        '{"event":"fanout_recovered","records":%d,"resuming_at":"%s"}'
-        % (replayed, fanout.state.last_seq)
+    uvicorn.run(
+        create_app(),
+        host=os.environ.get("QA_FANOUT_HOST", "0.0.0.0"),
+        port=int(os.environ.get("QA_FANOUT_PORT", DEFAULT_PORT)),
+        # uvicorn's own access log would print a line per WebSocket upgrade and nothing
+        # useful afterwards. The structured startup line and /health are the observability
+        # story here (Open Issue 012).
+        access_log=False,
+        log_config=None,
     )
-
-    fanout.start()
-    reporter = asyncio.create_task(_report(fanout), name="fanout-snapshot")
-    try:
-        await _until_signalled()
-    finally:
-        reporter.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await reporter
-        await fanout.stop()
-        fanout.log_snapshot()
-        await redis.aclose()
-
-
-async def _report(fanout: FanOut) -> None:
-    while True:
-        await asyncio.sleep(SNAPSHOT_INTERVAL_SECONDS)
-        fanout.log_snapshot()
 
 
 if __name__ == "__main__":
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main())
+    main()
