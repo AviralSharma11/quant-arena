@@ -109,6 +109,6 @@ def test_the_matcher_is_its_own_process_and_never_reaches_postgresql(compose: di
     does not live inside the gateway. And the engine is money-blind (Open Issue 001) — the read
     model belongs to the ledger, so the matcher is given no database URL at all."""
     matcher = compose["services"]["matcher"]
-    assert matcher["command"] == ["python", "-m", "services.matcher"]
-    assert set(matcher["environment"]) == {"QA_REDIS_URL"}
+    assert matcher["command"] == ["python", "-m", "services.matcher.cpp_runner"]
+    assert set(matcher["environment"]) == {"QA_REDIS_URL", "QA_CPP_ENGINE_PATH"}
     assert set(matcher["depends_on"]) == {"redis"}
