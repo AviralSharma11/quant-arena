@@ -15,13 +15,9 @@ Three reconciliations are needed, and each is a real difference rather than a na
    the resulting `Fill`. A single book would therefore trade symbol 3 against symbol 7 at a
    matching price. So a book is held per `symbol_id`.
 
-3. **The maker price.** `naive_model.match()` sets `trade_price = ask_order.price`
-   unconditionally. The frozen schema says `Fill.price_ticks` is *"Always the resting (maker)
-   price — price-time priority"*. Those agree only when the buy is the aggressor. When a sell
-   aggresses into a resting bid, the maker is the bid and the model prints the taker's price.
-   **Contracts v1 is frozen and outranks**, so the maker's price is emitted here and the
-   model's own `Fill.price` is discarded. This divergence is Dev A's to fix in
-   `engine/naive_model.py`; until it is, Task 4.1's differential tests will disagree here.
+3. **The maker price.** The model and the frozen schema both use the resting order's price.
+   The book tracks arrival order so a seller aggressing into a resting bid prints the bid price,
+   rather than the seller's lower limit.
 
 Two behaviours are preserved deliberately, because a consumer could come to depend on them and
 then break when the C++ engine arrives at the week-5 integration point:
@@ -263,7 +259,7 @@ class NaiveMatcher:
     def _to_contract_fill(
         self, taker: SubmitOrder, model_fill, *, taker_order_id: int
     ) -> Fill:
-        """One model fill, translated — and repriced to the maker.
+        """Translate one model fill into the frozen contract.
 
         The model reports `buy_order_id` / `sell_order_id`; the contract needs maker and taker,
         which is why `aggressor_side` exists at all (it "cannot be derived after the fact",
@@ -286,8 +282,7 @@ class NaiveMatcher:
             taker_order_id=taker_order_id,
             maker_user_id=maker.user_id,
             taker_user_id=filled.user_id,
-            # The resting price, not `model_fill.price`. See this module's docstring.
-            price_ticks=maker.price_ticks,
+            price_ticks=model_fill.price,
             qty=model_fill.quantity,
             symbol_id=maker.symbol_id,
             aggressor_side=int(taker.side),

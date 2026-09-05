@@ -111,6 +111,8 @@ private:
     std::map<long long, PriceLevel, std::greater<long long>> bids_;
     std::map<long long, PriceLevel> asks_;
     std::map<long long, Order> orders_by_id_;
+    std::map<long long, std::uint64_t> arrival_sequence_;
+    std::uint64_t next_arrival_sequence_{0};
 };
 
 }  // namespace quant_arena::engine

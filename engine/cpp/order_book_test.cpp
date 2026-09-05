@@ -40,6 +40,7 @@ int main() {
             book.add_order(Order{4, 21, "QA-TECH", Side::Sell, 99, 8, 2});
             auto fills = book.match();
             check(fills.size() == 1, "partial fill creates one fill");
+            check(fills[0].price == 100, "seller aggressor trades at the resting bid price");
             check(fills[0].quantity == 8, "partial fill quantity is correct");
             check(book.get_order(3)->remaining_quantity == 12, "remaining buy quantity is correct");
             check(!book.best_ask().has_value(), "sell order was fully consumed");

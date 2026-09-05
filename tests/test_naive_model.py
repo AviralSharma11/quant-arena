@@ -145,6 +145,18 @@ def test_matching_loop_handles_partial_fill_and_resting_order():
     assert book.best_ask is None
 
 
+def test_matching_loop_uses_resting_bid_price_when_seller_aggresses():
+    book = OrderBook()
+    buy = Order(12, 20, "QA-TECH", Side.BUY, 100, 5, 1)
+    sell = Order(13, 21, "QA-TECH", Side.SELL, 90, 5, 2)
+
+    book.add_order(buy)
+    book.add_order(sell)
+    fills = book.match()
+
+    assert fills[0].price == 100
+
+
 def test_matching_loop_does_nothing_when_no_crossing_order_exists():
     book = OrderBook()
     buy = Order(20, 30, "QA-TECH", Side.BUY, 98, 10, 1)

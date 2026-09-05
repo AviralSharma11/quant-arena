@@ -98,6 +98,8 @@ class OrderBook:
     bids: Dict[int, PriceLevel] = field(default_factory=dict)
     asks: Dict[int, PriceLevel] = field(default_factory=dict)
     orders_by_id: Dict[int, Order] = field(default_factory=dict)
+    _arrival_sequence: Dict[int, int] = field(default_factory=dict, init=False, repr=False)
+    _next_arrival_sequence: int = field(default=0, init=False, repr=False)
 
     def side_map(self, side: Side) -> Dict[int, PriceLevel]:
         return self.bids if side == Side.BUY else self.asks
@@ -106,6 +108,8 @@ class OrderBook:
         if order.order_id in self.orders_by_id:
             raise ValueError(f"order {order.order_id} already exists in the book")
         self.orders_by_id[order.order_id] = order
+        self._arrival_sequence[order.order_id] = self._next_arrival_sequence
+        self._next_arrival_sequence += 1
         target = self.side_map(order.side)
         if order.price not in target:
             target[order.price] = PriceLevel(order.price)
@@ -119,6 +123,7 @@ class OrderBook:
         order = self.orders_by_id.pop(order_id, None)
         if order is None:
             return None
+        self._arrival_sequence.pop(order_id, None)
         target = self.side_map(order.side)
         level = target.get(order.price)
         if level is None:
@@ -145,7 +150,10 @@ class OrderBook:
                 return fills
 
             trade_qty = min(bid_order.remaining_quantity, ask_order.remaining_quantity)
-            trade_price = ask_order.price
+            bid_arrival = self._arrival_sequence[bid_order.order_id]
+            ask_arrival = self._arrival_sequence[ask_order.order_id]
+            maker_order = bid_order if bid_arrival < ask_arrival else ask_order
+            trade_price = maker_order.price
             fills.append(
                 Fill(
                     buy_order_id=bid_order.order_id,
