@@ -1,11 +1,11 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-04 · **HEAD** `78ed4dc` · **Week 5** (25 Sep – 1 Oct) — running well ahead
-**State:** Weeks 3 and 4 closed. **565 tests pass**, 3 skipped (Dev A's C++ binary absent; two
-bot obligation tests skipped by their own outage guard). Week 4 is seven commits on
+**Last updated:** 2026-09-05 · **HEAD** `8b6aa57` · **Week 5** (25 Sep – 1 Oct) — running well ahead
+**State:** Weeks 3 and 4 closed, **5.2b done**. **597 tests pass**, 1 skipped. Nine bot-session
+tests error on this machine: `dmm_qaa` exists in the dev database under a forgotten password —
+a data condition, not code (`docker compose down -v` clears it). Eleven commits on
 `task/4.0-week4-prework`, **not yet pushed** — the whole week goes up as one pull request.
-A live market runs: `docker compose --profile bots up` gives quoting market makers, noise
-traders, and fan-out deriving books from the stream.
+A live market runs, and fan-out now serves it: `docker compose up` includes `fanout` on :8001.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
 
 > This file is **Dev B's**. Dev A's rows are reported by me, never inferred from the repo.
@@ -15,45 +15,40 @@ traders, and fan-out deriving books from the stream.
 
 ## NOW
 
-**Task 5.2b · Fan-out completes** — Dev B, week 5 · *unblocks Dev A's 6.3*
+**Task 5.1 · Crypto fair value, replay clock, ten symbols** — Dev B, week 5
 
-- **Step:** WebSocket server on `/stream` · subscription filtering · the 20 Hz conflation tick ·
-  serialise once per symbol per tick · the private per-user stream with sequence numbers ·
-  the slow-client policy.
-- **Files:** `services/fanout/` (state and message builders exist from 5.2a), a compose service.
-- **Done when:** 200+ concurrent clients without ack latency degrading measurably · a slowed
-  client gets a lower frame rate and affects no other · reconnect recovers the full book from
-  the next snapshot · a private-stream gap is detectable from its sequence numbers ·
-  serialisation happens once per symbol per tick, verified by instrumentation.
-  (`WEEKLY_PLAN.md` task 5.2, Success Criteria 1–5 — **all five land here**; 5.2a could meet
-  none of them, which is why it carries its own definition of done in `services/fanout/README.md`.)
-- **Carry into it:** three contract questions for Dev A, below. `web/src/stream/session.ts` has
-  one flag, `USE_MOCK_STREAM`, which is the only call site that changes when this lands.
+- **Step:** replayed crypto history as the fair-value process · the replay clock at one real
+  second to one simulated minute · the ten-symbol table with real tick sizes · the deterministic
+  offline fallback generator.
+- **Files:** `services/bots/fairvalue.py` (the seeded walk stays, for tests and offline work),
+  `config/quant_arena.toml` `[symbols]` and `[replay]`, a pinned data file.
+- **Done when:** ten symbols show distinct, realistically moving prices · the replay ratio
+  appears in configuration *and in the stream* · the system runs fully offline from pinned data ·
+  the fallback generator is deterministic with no data file · the README states the price paths
+  derive from anonymised historical data.
+- **Carry into it:** `[symbols]` is provisional QAA/QAB, replaced wholesale here.
+  `market_data.bar_bucket_seconds` is where "a one-minute bar" stops being ambiguous.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **5.1** Crypto fair value, replay clock, ten symbols (Dev B, wk 5)
-2. **6.1a** Trading screen begins (Dev B, wk 5)
-3. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
+1. **6.1a** Trading screen begins (Dev B, wk 5)
+2. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
 
 ## Blocked / waiting
 
 - **On Dev A:** `naive_model.match()` prints the taker's price when the seller aggresses; the
   frozen schema requires the resting (maker) price. Reported, not fixed — Dev A's file. Task
   4.1's differential tests will disagree here until it lands.
-  Also **three contract clarifications**, best sent as one message, all needed before 5.2b:
-  (a) does a `bars:*` message carry `seq`? §3.5 says all do; the §3.3 example omits it.
-  (b) on `private`, is `seq` the dense per-user counter or the stream id? Read as the latter,
-  no private gap is detectable and 5.2's fourth criterion cannot be met.
-  (c) will the C++ engine emit `BookChanged`? Nothing does today; fan-out derives the book.
+  Also **five contract questions**, written up as `HANDOFF.md` and awaiting a reply. None blocks
+  Dev B: each is implemented under a stated reading isolated to one function per side. Q2 is
+  the one that matters most — `resumed` amends a frozen document. Q4 (`BookChanged`) is the one
+  that could cost *Dev A* rework, so it wants an answer before 4.2 is built.
   *(Integration point 1 is passed. The next is end of week 5: the C++ engine process replaces
-  the naive model. Appendix D.2.)*
+  the naive model. Appendix D.2 — expected to be a no-op for fan-out, which is engine-agnostic.)*
 - **On a decision from me:** nothing.
-- **On something external:** 35 duplicate `" 2"` files in the working tree — an iCloud sync
-  conflict, not a code problem. Untracked and never committed, but they double-collect the
-  contracts tests (801 reported instead of 568). Delete them and add a `.gitignore` rule.
+- **On something external:** nothing. (The iCloud duplicate files cleared in `f729ed3`.)
 
 *Empty is the normal state. Dev B has almost no cross-developer dependencies. A long list here
 means something is wrong with the plan, not with the week.*
@@ -88,7 +83,7 @@ means something is wrong with the plan, not with the week.*
 | 4.2  Engine process, Redis, replay recovery | A | 5 | A:unknown | — |
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
-| 5.2b Fan-out completes — conflation, WS server | B | 5 | todo | **unblocks Dev A 6.3** |
+| 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
 | 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | todo | — |
 | 6.1a Trading screen begins | B | 5 | todo | — |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
@@ -115,13 +110,6 @@ means something is wrong with the plan, not with the week.*
 ## This week — week 5 (25 Sep – 1 Oct)
 
 Dev B's tasks with their Success Criteria as a live checklist. Deleted when the week closes.
-
-**5.2b Fan-out completes** — *unblocks Dev A 6.3*
-- [ ] 200+ concurrent clients receive updates without ack latency degrading measurably
-- [ ] A deliberately slowed client gets a lower frame rate and demonstrably affects no other
-- [ ] Disconnect and reconnect recovers the full book from the next snapshot, no special handling
-- [ ] A gap in the private stream is detectable from its sequence numbers
-- [ ] Serialisation happens once per symbol per tick, verified by instrumentation
 
 **5.1 Crypto fair value, replay clock, ten symbols**
 - [ ] Ten symbols show distinct, realistically moving prices
@@ -178,6 +166,10 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-04 | Fan-out keeps its **own** `Book` rather than sharing a resting-order projection | risk.py, ledger.py and matcher/adapter.py already each rebuild resting orders; four shapes differ enough that one abstraction serving all would be worse. Duplication chosen with open eyes — revisit at a fifth consumer, or at the first disagreement | `services/fanout/README.md` §2 |
 | 2026-09-04 | Price levels are **aggregated on read**, not maintained | A maintained map is a second structure that can drift from the first; summing cannot. First file to open when fan-out is measured as the bottleneck | `services/fanout/README.md` §3 |
 | 2026-09-04 | Bars bucket on **stream time**, with the width in `market_data.bar_bucket_seconds` | The replay clock in 5.1 makes "one-minute bar" ambiguous — one real minute or one simulated minute — and 7.1's backtester consumes whichever it means. Configuration so 5.1 answers it by changing a line | stages Open Issue 005 §10.5 |
+| 2026-09-05 | `seq` on `private` is a **dense per-user counter**, not the stream id | §3.4's example shows a stream id, which counts every record on the stream and so is dense for nobody — read literally, no private gap is detectable and 5.2's fourth criterion is unmeetable by any implementation | reads §3.4 against §3.5 and OI 006 §7c; HANDOFF Q1 |
+| 2026-09-05 | A market frame for a busy client is **skipped**; a private message is **buffered, then the connection closed** | The droppable/non-droppable distinction at the last hop. The next snapshot supersedes a skipped frame; nothing supersedes a lost fill | implements OI 006's slow-client policy |
+| 2026-09-05 | The gateway **publishes** its halt state to `qa:halt`; fan-out relays it | The halt flag is in gateway memory (OI 004) and fan-out is another process, so nothing could send §3.6's `halted`. Fan-out pinging Redis was rejected — "fan-out can reach Redis" is not "the gateway can durably record orders", and a readable-but-not-writable store separates them in the direction that matters | — |
+| 2026-09-05 | Session lookups use a **blocking** Redis pool | redis-py's default pool *raises* when exhausted: 200 browsers reconnecting at once refused 73 of themselves. A session lookup is one local GET, so queueing is invisible and failing is a dead feed | found by `benchmarks/bench_fanout.py` |
 
 ## Deviations from the plan
 
@@ -207,6 +199,13 @@ decisions: a schedule deviation is not a design change.
   re-render, verifiable in the React profiler" needs a human at a browser, and there is no JS
   test framework by decision. What is proven: the buffer cannot notify, the modules cannot
   reach React, and 1,000 messages between two frames produce exactly one paint.
+- **`resumed` is a fifth WebSocket error code, and a deviation from the frozen contract.**
+  §3.6 enumerates four codes, all failures, with no way to say a halt has *ended* — while a halt
+  clears on its own within one watchdog interval. Additive, so an unknown code is ignorable.
+  Implemented and flagged; **needs Dev A's sign-off** (HANDOFF Q2).
+- **5.2's Criterion 1 was measured on one machine, not a separated topology.** Docker Hub was
+  unreachable, so gateway, fan-out, 200 sockets and the harness shared ten cores. The median
+  (+4.2%) and the encode counts hold; the p95 and max are pessimistic — re-measure for 7.4.
 
 ## How to run it right now
 
@@ -220,7 +219,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
 python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest -q               # 565 tests, against the compose stores
+.venv/bin/python -m pytest -q               # 597 tests, against the compose stores
+curl localhost:8001/health                  # fan-out: stream position, ticks, serialisations
 QA_BOT_PASSWORD=... docker compose --profile bots up -d   # a live market: makers + noise
 
 cd web && npm install && npm run dev        # frontend at localhost:5173, proxied to the gateway
