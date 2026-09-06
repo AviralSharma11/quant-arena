@@ -17,7 +17,7 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
 
 ## NOW
 
-**Task 5.1 · Crypto fair value, replay clock, ten symbols** — Dev B, week 5
+**Task 5.1 · Crypto fair value, replay clock, ten symbols** — Dev B, week 5 · **wip**
 
 - **Step:** replayed crypto history as the fair-value process · the replay clock at one real
   second to one simulated minute · the ten-symbol table with real tick sizes · the deterministic
@@ -28,8 +28,8 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
   appears in configuration *and in the stream* · the system runs fully offline from pinned data ·
   the fallback generator is deterministic with no data file · the README states the price paths
   derive from anonymised historical data.
-- **Carry into it:** `[symbols]` is provisional QAA/QAB, replaced wholesale here.
-  `market_data.bar_bucket_seconds` is where "a one-minute bar" stops being ambiguous.
+- **Carry into it:** `[symbols]` is provisional QAA/QAB, replaced wholesale here — every
+  `symbol_id` moves, so this is a truncate-and-restart. Criterion 2 waits on Amendment 2.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
@@ -40,15 +40,13 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
 
 ## Blocked / waiting
 
-- **All five `HANDOFF.md` contract questions are answered** as of 2026-09-05. Q4 and Q5 by
-  Dev A's code; Q1, Q2 and Q3 by Dev A's reply. Nothing on the browser wire is now open.
-  *(Both integration points are passed. Appendix D.2's engine swap was a no-op for fan-out, as
-  designed — `docker-compose.yml` now runs `services.matcher.cpp_runner`.)*
-- **On Dev A:** **4.2 is reported unfinished.** Its engine process, Redis integration and
-  anchor-based replay recovery are merged (`b644130`) and live in compose, so this blocks
-  nothing — but the task is not closed and integration point 2 is not formally signed off.
+- **All five round-1 `HANDOFF.md` questions are answered.** Both integration points are passed;
+  the engine swap was the no-op for fan-out it was designed to be.
+- **On Dev A — one ask, `HANDOFF.md` §3: Amendment 2.** A new `ConfigureReplay`/`ReplayConfigured`
+  pair and six lines in `stream_engine.cpp`, agreed in principle, to be done after their current
+  task. It gates **5.1 criterion 2 only**; the other four are independent. 4.2 also unfinished.
 - **On a decision from me:** nothing.
-- **On something external:** nothing. (The iCloud duplicate files cleared in `f729ed3`.)
+- **On something external:** nothing.
 
 *Empty is the normal state. Dev B has almost no cross-developer dependencies. A long list here
 means something is wrong with the plan, not with the week.*
@@ -84,7 +82,7 @@ means something is wrong with the plan, not with the week.*
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
 | 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
-| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | todo | — |
+| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | wip | — |
 | 6.1a Trading screen begins | B | 5 | todo | — |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
@@ -181,25 +179,21 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 Task moved weeks · scope cut · estimate blown · criterion waived — with the reason. Distinct from
 decisions: a schedule deviation is not a design change.
 
-- **1.1's joint session (Appendix D.2) happened as async review, not a half-day together.**
-  Dev B wrote the full contract as a proposal; Dev A reviewed and signed off the same day.
-  Outcome as specified, mechanism not. No schedule impact.
+- **1.1's joint session (Appendix D.2) was an async review, not a half-day together.** Dev B
+  proposed the full contract; Dev A signed off the same day. Outcome as specified, mechanism not.
 - **3.1 Success Criterion 3 is unverified, not passing.** "A cancel that loses the race to a
   fill releases nothing" could not be constructed reliably against a live matcher. Recorded
   rather than claimed. A deterministic harness for it is a natural fit for 4.1.
-- **Tasks 3.1 and 3.2 were marked `done` on their branch while four success criteria failed.**
-  Found by an audit on 2 Sep and fixed the same day. The lesson is in the checklist above:
-  a criterion is verified by exercising it, not by the task's own unit tests passing.
+- **3.1 and 3.2 were marked `done` while four success criteria failed.** Found by audit on 2 Sep,
+  fixed the same day. A criterion is verified by exercising it, not by unit tests passing.
 - **3.3 was split.** CI, the nightly stub and multi-arch images merged as `5efe462`; the
   deployment half (HTTPS, one-command redeploy) was deferred out of week 3 by decision and is
   now carried behind week 5. Criteria 2 and 4 pass; 1 and 3 are untouched.
-- **Two further defects in finished Task 3.1**, found in week 4 by running it rather than
-  reading it: a sell reserved cash it never released (two sells of half the grant exhausted an
-  account that had spent nothing), and nothing checked the position at all, so every account
+- **Two further defects in finished Task 3.1**, found in week 4 by running it rather than reading
+  it: a sell reserved cash it never released, and nothing checked the position, so any account
   could short. Same lesson as the week-3 audit, one week later.
-- **`RiskState.watch_stream` died on the first Redis error** — the one long-running loop in the
-  system with no exception handling. `/health` recovered while the gateway stayed permanently
-  blind to the stream. Task 2.1's fifth criterion passed while the property behind it did not.
+- **`RiskState.watch_stream` died on the first Redis error** — the one long-running loop with no
+  exception handling. `/health` recovered while the gateway stayed blind to the stream.
 - **5.4c's Success Criterion 5 is mechanism-verified, not profiler-verified.** "No React
   re-render, verifiable in the React profiler" needs a human at a browser, and there is no JS
   test framework by decision. What is proven: the buffer cannot notify, the modules cannot
@@ -208,16 +202,13 @@ decisions: a schedule deviation is not a design change.
   §3.6 enumerates four codes, all failures, with no way to say a halt has *ended* — while a halt
   clears on its own within one watchdog interval. Additive, so an unknown code is ignorable.
   Implemented and flagged; **needs Dev A's sign-off** (HANDOFF Q2).
-- **Dev A's C++ work uses neither CMake, Catch2 nor nanobind**, all three named in `CLAUDE.md`'s
-  closed stack. What exists: a bare `g++` line in the `Dockerfile`, a hand-rolled
-  `order_book_test.cpp`, and a subprocess/stdin-stdout boundary instead of a binding. Recorded as
-  observed, not judged — 3.4 is Dev A's task and Dev A reported it done.
-- **`engine/cpp/stream_engine.cpp` hand-codes the wire format** rather than including the
-  generated `contracts/v1/generated/contracts.hpp`. Record sizes and field offsets are literals.
-  `generate.py --check` cannot see a drift here; only 4.1's differential tests can. Dev B has
-  asked Dev A to drive the C++ from `schema.toml` instead.
-- **Dev A edited `STATUS.md` and `services/matcher/adapter.py` in `e8bc8e9`**, including replacing
-  a row in the append-only decision log. Noted so the log's history is not silently wrong.
+- **Dev A's C++ uses neither CMake, Catch2 nor nanobind** (all in `CLAUDE.md`'s closed stack):
+  a bare `g++` line, a hand-rolled `order_book_test.cpp`, a subprocess instead of a binding.
+  Observed, not judged — 3.4 is Dev A's and Dev A reported it done.
+- **`stream_engine.cpp` hand-codes record sizes and field offsets** instead of including the
+  generated `contracts.hpp`. `generate.py --check` cannot see a drift; only 4.1's tests can.
+  Dev A asked to drive it from `schema.toml`. `HANDOFF.md` §2.
+- **Dev A edited `STATUS.md` and the append-only decision log in `e8bc8e9`.**
 - **5.2's Criterion 1 was measured on one machine, not a separated topology.** Docker Hub was
   unreachable, so gateway, fan-out, 200 sockets and the harness shared ten cores. The median
   (+4.2%) and the encode counts hold; the p95 and max are pessimistic — re-measure for 7.4.
@@ -251,15 +242,9 @@ that skip has not verified 1.1's Success Criterion 3.
 
 *(one line per closed week — everything else from that week is deleted; git history is the record)*
 
-- **Week 1 (28 Aug – 3 Sep) — closed 31 Aug, 3 days early.** 1.1 contracts frozen and merged ·
-  1.3 gateway skeleton · 1.4 Docker stack and shared config · 5.4a frontend scaffold. All Dev B
-  and joint criteria passed with named tests; 331 tests green. Dev A's 1.2 and 2.3 not reported.
-- **Week 2 (4–10 Sep) — closed 2 Sep.** 2.1 streams and durability · 2.2 ledger and replay ·
-  5.4b auth screens · integration point 1: the stub engine swapped for Dev A's naive model over
-  the real stream. 398 tests green.
-- **Week 3 (11–17 Sep) — closed 4 Sep.** 3.1 risk and reservations · 3.2 idempotency with an
-  atomic Lua claim · 3.3 CI, nightly and multi-arch images (deployment half deferred). Four
-  defects found by audit and two more by running it; all fixed.
+- **Week 1 — closed 31 Aug, 3 days early.** 1.1 · 1.3 · 1.4 · 5.4a. 331 tests green.
+- **Week 2 — closed 2 Sep.** 2.1 · 2.2 · 5.4b · integration point 1. 398 tests green.
+- **Week 3 — closed 4 Sep.** 3.1 · 3.2 · 3.3 (deployment half deferred). Six defects fixed.
 - **Week 4 (18–24 Sep) — closed 4 Sep.** Pre-work: symbol registry, rate limiting, and a ledger
   that finally runs · designated market makers · 4.4 bots · 5.2a fan-out begins · 5.4c
   WebSocket client and rAF loop. 565 tests green. Seven commits, unpushed.
