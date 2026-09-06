@@ -13,3 +13,6 @@ argon2-cffi==25.1.0
 # The bots are real API clients (Task 4.4's Boundaries), so the HTTP client they use has to
 # be in the image. It was dev-only while it existed solely for FastAPI's TestClient.
 httpx==0.28.1
+# Parquet, named in the stack list. Task 5.1's pinned price history is a Parquet file that the
+# bots read at startup; the archiver (6.2) and the backtester (7.1) read the same format.
+pyarrow==25.0.1

@@ -72,6 +72,34 @@ green run carrying that skip has not verified C++/Python size parity.
 
 ------------------------------------------------------------------------
 
+## Where the prices come from
+
+**The price paths in Quant Arena derive from anonymised historical data.** Ten fictional
+symbols, `QAA` through `QAJ`, each replay the recorded one-minute price history of a real
+cryptocurrency instrument. Real history is used deliberately: it brings volatility clustering,
+regime changes and genuine trends that a synthetic model would approximate worse and take far
+longer to write — and because the simulated market is the data-generating process for the
+backtester, a price series with no statistical structure would make every backtest meaningless.
+
+The data is anonymised in a checkable sense rather than a nominal one. The committed dataset,
+`data/market_history.parquet`, contains **no instrument names and no timestamps** — only a
+fictional symbol, a zero-based minute index and an integer price — so a row cannot be joined
+back to a moment in the real market from the file alone. The symbol names are deliberately
+meaningless, because nobody should be able to believe they are trading the real instrument, and
+because a placeholder that reads like a real ticker is the one most likely to survive into a
+demonstration by accident.
+
+Prices are replayed at **one real second to one simulated minute**, so a few minutes at the
+screen covers a trading day. The dataset is **pinned**: it is fetched once by
+`scripts/fetch_market_history.py`, committed, and verified at startup against the SHA-256
+recorded in `config/quant_arena.toml`. Nothing fetches at runtime — a live fetch would destroy
+reproducibility, which is a stated goal of this project — and with no data file present the
+market falls back to a seeded random walk that produces the same path every time.
+
+No real money, no real exchange, and no order ever leaves this system.
+
+------------------------------------------------------------------------
+
 ## Project Overview
 
 Quant Arena is a simulated electronic trading and quantitative research

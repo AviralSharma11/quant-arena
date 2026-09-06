@@ -80,6 +80,7 @@ _MINIMAL_CONFIG = """
     bar_bucket_seconds = [1, 60]
     [replay]
     real_seconds_per_simulated_minute = 1
+    data_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
     [streams]
     inbound = "in"
     outbound = "out"
@@ -103,24 +104,55 @@ _SECOND_SYMBOL_WITH_ID_ONE = """
 """
 
 
-def test_symbols_are_provisional_until_task_5_1():
-    """The listed symbols are placeholders, and the test says so out loud.
+def test_ten_symbols_are_listed():
+    """Task 5.1 replaced the provisional QAA/QAB pair wholesale. Success Criterion 1, first half.
 
-    They were empty until week 4 on the principle that an invented list looks settled when it
-    is not. Week 4 forced the issue — Task 4.4's bots need something to quote and `GET /symbols`
-    is the frozen contract's only source of names, tick sizes and the enum tables. Task 5.1
-    replaces this block wholesale with ten symbols drawn from replayed crypto history.
-
-    Two entries, not one, so that the matcher's one-book-per-`symbol_id` rule is exercised
-    rather than assumed.
+    This test previously asserted the *opposite* — that exactly two provisional symbols were
+    listed — so that it would fail the moment 5.1 landed rather than letting a placeholder
+    survive into the demonstration unnoticed. It has done its job and now asserts the real table.
     """
     symbols = Settings.load().symbols
-    assert [s.symbol_id for s in symbols] == [1, 2]
-    assert [s.name for s in symbols] == ["QAA", "QAB"]
-    # Open Issue 005 section 10 and Task 5.1 both forbid naming a symbol after a real
-    # instrument. A placeholder that reads like a real ticker is the one most likely to
-    # survive into the demonstration by accident.
-    assert not {s.name for s in symbols} & {"BTC", "ETH", "SOL", "XRP", "DOGE", "ADA"}
+    assert [s.symbol_id for s in symbols] == list(range(1, 11))
+    assert [s.name for s in symbols] == [f"QA{letter}" for letter in "ABCDEFGHIJ"]
+
+
+def test_no_symbol_is_named_after_a_real_instrument():
+    """Open Issue 005 section 10 and Task 5.1's Boundaries both forbid it.
+
+    The price paths behind these symbols *are* real, which is exactly why the names must not be:
+    a placeholder that reads like a real ticker is the one most likely to survive into the
+    demonstration by accident, and nobody should be able to believe they are trading the real
+    instrument.
+    """
+    names = {s.name for s in Settings.load().symbols}
+    real = {"BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT",
+            "BTCUSDT", "ETHUSDT", "USDT", "BITCOIN", "ETHEREUM"}
+    assert not names & real
+
+
+def test_the_ten_symbols_do_not_all_share_one_tick_size():
+    """Success Criterion 1, second half — "distinct" is about scale, not just about count.
+
+    The provisional block set every `tick_size_ticks` to 1 and said in a comment that this was
+    "not a considered value". Ten symbols that all shared one tick size would assert that all ten
+    trade on the same scale, which is the placeholder property this task exists to remove. The
+    values here are the real increments of the instruments behind each symbol.
+    """
+    tick_sizes = {s.tick_size_ticks for s in Settings.load().symbols}
+    assert len(tick_sizes) >= 4
+    assert all(size > 0 for size in tick_sizes)
+
+
+def test_every_symbol_has_a_designated_market_maker():
+    """Open Issue 005 section 10.6: the market maker list is explicit, never a prefix rule.
+
+    It grew from two names to ten with the symbol table. A symbol without one lists and quotes
+    nothing — the bot runner logs `no_market_maker` and moves on — so this is the check that
+    catches the two lists drifting apart.
+    """
+    settings = Settings.load()
+    for symbol in settings.symbols:
+        assert f"dmm_{symbol.name.lower()}" in settings.designated_market_maker_accounts
 
 
 def test_a_symbol_missing_a_field_fails_loudly(tmp_path: Path):
@@ -174,6 +206,7 @@ def test_a_missing_domain_parameter_fails_loudly(tmp_path: Path):
         # book_depth deliberately missing
         [replay]
         real_seconds_per_simulated_minute = 1
+        data_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
         [symbols]
         listed = []
     """)
