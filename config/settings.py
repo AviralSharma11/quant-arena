@@ -193,6 +193,10 @@ class Settings:
     #: second means once the replay clock exists.
     bar_bucket_seconds: tuple[int, ...]
     replay_real_seconds_per_simulated_minute: int
+    #: SHA-256 of the pinned price history. The dataset's *identity* is a domain parameter — it
+    #: determines every price in the market — so it is hashed with the rest of the file. Its
+    #: path is infrastructure and lives in `services/bots/fairvalue.py`.
+    replay_data_sha256: str
     stream_inbound: str
     stream_outbound: str
     stream_maxlen: int
@@ -243,6 +247,7 @@ class Settings:
             replay_real_seconds_per_simulated_minute=_require(
                 table, "replay", "real_seconds_per_simulated_minute"
             ),
+            replay_data_sha256=_require(table, "replay", "data_sha256"),
             stream_inbound=_require(table, "streams", "inbound"),
             stream_outbound=_require(table, "streams", "outbound"),
             stream_maxlen=_require(table, "streams", "maxlen"),

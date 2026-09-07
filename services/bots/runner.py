@@ -34,7 +34,7 @@ import random
 
 from config.settings import Settings
 from services.bots.client import BotClient
-from services.bots.fairvalue import SyntheticFairValue
+from services.bots.fairvalue import build_fair_value, load_replay_history
 from services.bots.market_maker import MarketMaker
 from services.bots.noise import NoiseTrader
 from services.bots.obligations import ObligationMeter
@@ -126,6 +126,10 @@ class BotRunner:
 
     async def build(self, stack: contextlib.AsyncExitStack) -> None:
         bots = self.settings.bots
+        # Loaded once for the whole session, not once per symbol: it is one file read and ten
+        # lookups. `None` means no pinned data, and every symbol falls back to the seeded walk —
+        # which is Task 5.1's fourth success criterion, and normal offline development.
+        history = load_replay_history(self.settings)
         for symbol in self.settings.symbols:
             maker_name = self.market_maker_name(symbol.symbol_id)
             if maker_name is None:
@@ -145,10 +149,12 @@ class BotRunner:
                     MarketMaker(
                         client=client,
                         symbol_id=symbol.symbol_id,
-                        fair_value=SyntheticFairValue(
-                            start_ticks=bots.fair_value_start_ticks,
-                            volatility_ticks=bots.fair_value_volatility_ticks,
+                        fair_value=build_fair_value(
+                            symbol_name=symbol.name,
+                            symbol_id=symbol.symbol_id,
+                            settings=self.settings,
                             rng=derive_rng(bots.seed, "fairvalue", symbol.symbol_id),
+                            history=history,
                         ),
                         settings=bots,
                         meter=ObligationMeter(

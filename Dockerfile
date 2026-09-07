@@ -37,6 +37,11 @@ COPY contracts/ ./contracts/
 # end-of-week-2 integration point; the gateway itself never imports it.
 COPY engine/ ./engine/
 COPY services/ ./services/
+# The pinned price history the bots replay (Task 5.1). Without it the bots fall back to the
+# seeded random walk and say so in the log — a working market, but a synthetic one, which is
+# not what a demonstration is meant to show. 319 KB, and the layer changes only when the
+# dataset is re-fetched.
+COPY data/ ./data/
 
 USER quant
 EXPOSE 8000

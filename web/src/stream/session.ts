@@ -9,14 +9,17 @@
 import { MarketBuffer } from "./buffer.ts";
 import { StreamClient } from "./client.ts";
 import { MockStreamSocket } from "./mock.ts";
+import { channelsFor, type Symbol } from "./symbols.ts";
 import type { ConnectionState } from "./types.ts";
 
-/** The symbols subscribed to. Task 5.1 replaces the provisional pair; `GET /symbols` is the
- *  real source, which Task 6.1 will read when the trading screen needs tick sizes. */
-export const STREAM_SYMBOLS = ["QAA", "QAB"];
-
-/** @deprecated Kept because 5.4c's tests import it by this name. */
-export const MOCK_SYMBOLS = STREAM_SYMBOLS;
+/**
+ * The symbols the session subscribes to are **passed in**, resolved from `GET /symbols`.
+ *
+ * They used to be the constant `["QAA", "QAB"]`, which was right while two provisional symbols
+ * were all that existed and became silently wrong the moment Task 5.1 listed ten with four
+ * different tick sizes. §2.3 makes that endpoint the only source of names and scales, so the
+ * client resolves them and never holds its own copy.
+ */
 
 /**
  * False from Task 5.2b, which serves `/stream` from `services/fanout`.
@@ -38,14 +41,15 @@ export interface StreamSession {
 }
 
 export function startStreamSession(options: {
+  symbols: readonly Symbol[];
   onState: (state: ConnectionState) => void;
   onResync?: () => void | Promise<void>;
 }): StreamSession {
   const buffer = new MarketBuffer();
-  const channels = STREAM_SYMBOLS.flatMap((symbol) => [
-    `book:${symbol}:l2`,
-    `tape:${symbol}`,
-  ]);
+  // Book, tape and bars for every listed symbol. Bars are new in 6.1a — the chart needs them,
+  // and nothing subscribed to them before there was a chart to draw.
+  const channels = channelsFor(options.symbols);
+  const names = options.symbols.map((symbol) => symbol.name);
 
   let mock: MockStreamSocket | null = null;
   const client = new StreamClient({
@@ -56,7 +60,7 @@ export function startStreamSession(options: {
     onResync: options.onResync,
     socketFactory: USE_MOCK_STREAM
       ? () => {
-          mock = new MockStreamSocket({ symbols: STREAM_SYMBOLS });
+          mock = new MockStreamSocket({ symbols: names });
           // The handshake completes on the next turn of the event loop, so the caller has
           // finished wiring `onopen` before it fires — which is how a real socket behaves.
           const socket = mock;

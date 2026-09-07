@@ -44,20 +44,45 @@ book_depth = 10
 # OHLCV bar widths, in seconds of **stream time** — the `timestamp_ns` the gateway stamped on
 # the order, not the wall clock of whoever is reading.
 #
-# REVISIT AT TASK 5.1. The distinction is currently invisible because stream time is wall-clock
-# time, but 5.1 introduces a replay clock at one real second to one simulated minute (Open
-# Issue 005 sub-decision 5g), and then "a one-minute bar" becomes ambiguous: one real minute, or
-# one simulated minute, which is one real second. At present rates the first holds thousands of
-# fills and the second holds a handful, and the backtester in 7.1 consumes whichever this means.
+# SETTLED AT TASK 5.1, which is what this line was left in configuration for.
 #
-# Deliberately left as a width in configuration rather than a constant, so 5.1 can settle the
-# question by changing this line instead of the aggregation code.
+# The question was whether "a one-minute bar" means one real minute or one simulated minute,
+# which under the replay clock is one real second. **`bars:*:1m` on the browser wire means one
+# SIMULATED minute** — one real second, the first width below. That is the minute the *market*
+# experiences: at 1 real second : 1 simulated minute a real minute contains sixty simulated
+# minutes of price action, so a chart drawn on real minutes would compress an hour of market
+# history into one candle and show almost nothing moving.
+#
+# Both widths are kept. The 60-second bucket is one simulated *hour* and is what the backtester
+# (7.1) uses for a coarser series; the 1-second bucket is what the trading screen charts. The
+# aggregation code is unchanged either way — settling this was always a matter of choosing the
+# widths and saying which one the wire's "1m" refers to.
 bar_bucket_seconds = [1, 60]
 
 [replay]
 # Open Issue 005 sub-decision 5g: one real second maps to one simulated minute, so a demo shows
-# a trading day rather than a quiet minute. Configurable, and stamped into the stream from 2.1.
+# a trading day rather than a quiet minute.
+#
+# Stamping it into the *stream* is Task 5.1's second success criterion and is not yet done:
+# `schema.toml` has no record type that can carry a configuration value, so it needs Amendment 2
+# (`ConfigureReplay` / `ReplayConfigured`) and six lines in Dev A's engine. Specified in
+# `HANDOFF.md` section 3, agreed in principle, awaiting Dev A. The value is here and correct;
+# only the stream half is outstanding.
 real_seconds_per_simulated_minute = 1
+
+# The pinned dataset, by content. **Which** prices the market replays is a domain parameter every
+# process must agree on, so its identity belongs in this hashed file; *where the file sits* is
+# infrastructure and stays a constant in `services/bots/fairvalue.py`. One source of truth, so
+# there is nothing for a second copy to drift from.
+#
+# Produced by `python scripts/fetch_market_history.py`, which prints this line rather than
+# writing it: a script that edited the hashed configuration would change every process's
+# config_hash as a side effect of a fetch, and "did the configuration change?" is the one
+# question that hash exists to answer.
+#
+# Changing it is changing the market. Ten instruments of real one-minute crypto history, seven
+# days each — 10,080 minutes, which at the ratio above is about 2.8 hours before the loop wraps.
+data_sha256 = "7e25a04501f6ea306e5119d6cce14ea12ad928b1eff411784a1ab579e0a1fd09"
 
 [streams]
 # The durable ordered log. Open Issue 003: Redis Streams, and the stream ID *is* the sequence
@@ -105,8 +130,11 @@ ttl_seconds = 3600
 # inventory becomes retail on the next restart, and can then only buy back — `available` is
 # already below zero, so no further sell passes the check. It heals rather than compounding.
 #
-# Task 4.4 creates one market maker per symbol; the list grows with the symbol table in 5.1.
-designated_market_maker_accounts = ["dmm_qaa", "dmm_qab"]
+# Task 4.4 creates one market maker per symbol; 5.1 grew the list with the symbol table.
+designated_market_maker_accounts = [
+  "dmm_qaa", "dmm_qab", "dmm_qac", "dmm_qad", "dmm_qae",
+  "dmm_qaf", "dmm_qag", "dmm_qah", "dmm_qai", "dmm_qaj",
+]
 
 # The master seed. Every bot derives its own from this plus its name, so the whole session is
 # reproducible from one number (Open Issue 005 sub-decision 5d). Determinism here is a property
@@ -165,30 +193,86 @@ min_qty = 1
 max_qty = 10
 
 [symbols]
-# PROVISIONAL — replaced wholesale by Task 5.1.
+# The ten listed instruments. Task 5.1 replaced the provisional QAA/QAB pair wholesale.
 #
-# The ten real symbols and their tick sizes are decided in 5.1, from replayed crypto history.
-# This block was empty until week 4, on the principle that an invented list looks settled when
-# it is not. Week 4 forced the issue: Task 4.4's bots need something to quote, and `GET /symbols`
-# is the frozen contract's only source of symbol names, tick sizes and the enum tables, so the
-# frontend (5.4c) cannot resolve a `symbol_id` without it either. Two entries rather than one,
-# so that the matcher's one-book-per-`symbol_id` rule is exercised rather than assumed.
+# Each maps to one real crypto instrument's price history, replayed from the pinned Parquet.
+# The mapping lives in `scripts/fetch_market_history.py`; the data file itself carries no
+# instrument name and no timestamp, so a row cannot be joined back to a moment in the real
+# market without re-running the script. That is what "anonymised historical data" means here,
+# and the README says it in those terms.
 #
-# The names are deliberately meaningless. Open Issue 005 section 10 and Task 5.1 both forbid
-# naming a symbol after a real instrument, and a placeholder that reads like a real ticker is
-# the one most likely to survive into the demonstration by accident.
+# The names stay deliberately meaningless, for the reason the provisional block gave: Open Issue
+# 005 section 10 and Task 5.1's Boundaries both forbid naming a symbol after a real instrument,
+# and a placeholder that reads like a real ticker is the one most likely to survive into the
+# demonstration by accident. QAA-QAJ says "this is a simulation" on sight.
 #
-# `tick_size_ticks = 1` is not a considered value: the frontend divides by it for display, and
-# 1 is the only figure that asserts nothing about a scale 5.1 has yet to choose.
+# `tick_size_ticks` is the divisor the presentation layer applies for display, and it is the
+# real increment of the instrument behind each symbol rather than a round number: 100 means two
+# decimal places, 100_000 means five. Ten different values is the point. A table where every
+# tick size was 1 would assert that all ten trade on the same scale, which is precisely what
+# made the two-symbol block provisional.
+#
+# `symbol_id` 1 and 2 keep the names they had, but NOT the price scale — QAA was a 1,000-tick
+# random walk and is now a ~7,900,000-tick replay. Changing this block is a truncate-and-restart,
+# never a hot edit: every resting order, position and bar on the old stream is denominated in the
+# old scale. `docker compose down -v`.
 
 [[symbols.listed]]
 symbol_id = 1
 name = "QAA"
-tick_size_ticks = 1
+tick_size_ticks = 100
 lot_size = 1
 
 [[symbols.listed]]
 symbol_id = 2
 name = "QAB"
-tick_size_ticks = 1
+tick_size_ticks = 100
+lot_size = 1
+
+[[symbols.listed]]
+symbol_id = 3
+name = "QAC"
+tick_size_ticks = 100
+lot_size = 1
+
+[[symbols.listed]]
+symbol_id = 4
+name = "QAD"
+tick_size_ticks = 100
+lot_size = 1
+
+[[symbols.listed]]
+symbol_id = 5
+name = "QAE"
+tick_size_ticks = 10_000
+lot_size = 10
+
+[[symbols.listed]]
+symbol_id = 6
+name = "QAF"
+tick_size_ticks = 10_000
+lot_size = 10
+
+[[symbols.listed]]
+symbol_id = 7
+name = "QAG"
+tick_size_ticks = 100_000
+lot_size = 100
+
+[[symbols.listed]]
+symbol_id = 8
+name = "QAH"
+tick_size_ticks = 1_000
+lot_size = 1
+
+[[symbols.listed]]
+symbol_id = 9
+name = "QAI"
+tick_size_ticks = 1_000
+lot_size = 1
+
+[[symbols.listed]]
+symbol_id = 10
+name = "QAJ"
+tick_size_ticks = 1_000
 lot_size = 1
