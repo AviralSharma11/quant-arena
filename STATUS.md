@@ -1,9 +1,9 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-05 · **HEAD** `5a31c1b` · **Week 5** (25 Sep – 1 Oct) — running well ahead
-**State:** Weeks 3 and 4 closed, **5.2b done**. Week 4 merged to `main` as `bfd3e86`.
-**617 tests collected**; the 27 engine/model/adapter tests and 233 contract tests pass locally,
-the rest need the compose stores. Nine bot-session tests error on this machine: `dmm_qaa` exists
+**Last updated:** 2026-09-07 · **HEAD** `a67f1a4` · **Week 5** (25 Sep – 1 Oct) — running well ahead
+**State:** Weeks 3 and 4 closed. **5.1 is `wip` at four of five criteria.** **626 tests pass**
+against the compose stores, 1 xfailed (5.1 criterion 2, deliberately strict). Nine bot-session
+tests error on this machine: `dmm_qaa` exists
 in the dev database under a forgotten password — a data condition, not code
 (`docker compose down -v` clears it). **Dev A has reported 1.2, 2.3, 2.4, 3.4 and 4.1 done
 (2026-09-05)**, and the running stack now matches in C++ — integration point 2 landed early.
@@ -19,17 +19,11 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
 
 **Task 5.1 · Crypto fair value, replay clock, ten symbols** — Dev B, week 5 · **wip**
 
-- **Step:** replayed crypto history as the fair-value process · the replay clock at one real
-  second to one simulated minute · the ten-symbol table with real tick sizes · the deterministic
-  offline fallback generator.
-- **Files:** `services/bots/fairvalue.py` (the seeded walk stays, for tests and offline work),
-  `config/quant_arena.toml` `[symbols]` and `[replay]`, a pinned data file.
-- **Done when:** ten symbols show distinct, realistically moving prices · the replay ratio
-  appears in configuration *and in the stream* · the system runs fully offline from pinned data ·
-  the fallback generator is deterministic with no data file · the README states the price paths
-  derive from anonymised historical data.
-- **Carry into it:** `[symbols]` is provisional QAA/QAB, replaced wholesale here — every
-  `symbol_id` moves, so this is a truncate-and-restart. Criterion 2 waits on Amendment 2.
+- **Built in `a67f1a4`.** Criteria checklist below; four of five pass.
+- **Remaining:** run the stack on **clean volumes** and confirm ten live books.
+  `docker compose down -v` is required — every `symbol_id`'s price scale changed, so the
+  retained stream is denominated in the old one. The same wipe clears the `dmm_qaa` condition.
+- **Then:** criterion 2 waits on Amendment 2 (`HANDOFF.md` §3), which is Dev A's.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
@@ -48,8 +42,7 @@ A live market runs, and fan-out now serves it: `docker compose up` includes `fan
 - **On a decision from me:** nothing.
 - **On something external:** nothing.
 
-*Empty is the normal state. Dev B has almost no cross-developer dependencies. A long list here
-means something is wrong with the plan, not with the week.*
+*Empty is the normal state. A long list here means something is wrong with the plan.*
 
 ---
 
@@ -82,7 +75,7 @@ means something is wrong with the plan, not with the week.*
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
 | 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
-| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | wip | — |
+| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | wip | `a67f1a4` · 20 new tests · 4 of 5 criteria; criterion 2's stream half needs Amendment 2 |
 | 6.1a Trading screen begins | B | 5 | todo | — |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
@@ -110,11 +103,14 @@ means something is wrong with the plan, not with the week.*
 Dev B's tasks with their Success Criteria as a live checklist. Deleted when the week closes.
 
 **5.1 Crypto fair value, replay clock, ten symbols**
-- [ ] Ten symbols show distinct, realistically moving prices
-- [ ] The replay ratio appears in configuration and in the stream
-- [ ] The system runs fully offline from pinned data
-- [ ] The fallback generator produces a deterministic path with no data file present
-- [ ] The README states that price paths derive from anonymised historical data
+- [x] Ten symbols show distinct, realistically moving prices — normalised-shape comparison
+      proves ten different paths, not one offset ten ways
+- [ ] The replay ratio appears in configuration **and in the stream** — config yes; the stream
+      half needs Amendment 2, `xfail(strict=True)` so it cannot go quiet
+- [x] The system runs fully offline from pinned data — the test breaks `socket.socket` and loads
+- [x] The fallback generator is deterministic with no data file present
+- [x] The README states that price paths derive from anonymised historical data
+- [ ] *(not a criterion, but not done)* ten books verified live on clean volumes
 
 **6.1a Trading screen begins** — no criteria of its own; 6.1b carries them.
 
@@ -172,6 +168,12 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-05 | **Q3 answered: `bars:*` carries `seq`**, as implemented | The rule in §3.5 governs; §3.3's example is abbreviated. A channel without `seq` is the one channel no client could gap-check | closes HANDOFF Q3 |
 | 2026-09-05 | **Q4 answered: the C++ engine emits no `BookChanged`** | `engine/cpp/stream_engine.cpp` enumerates its outputs and the type is absent. Fan-out's derived book stands and the engine swap did not touch it | closes HANDOFF Q4 |
 | 2026-09-05 | **Q5 answered: both engines price at the resting maker** | Dev A's `e8bc8e9` tracks arrival order in the Python model and the C++ book; the adapter's override was removed | closes HANDOFF Q5 |
+| 2026-09-06 | `bars:*:1m` means one **simulated** minute; both bucket widths kept | A real minute holds sixty simulated minutes of price action, so a chart on real minutes compresses an hour into one candle. This is the question the config file parked for 5.1 | settles `market_data.bar_bucket_seconds` |
+| 2026-09-06 | The replay clock is a **function of elapsed real time**, never a counter | A counter drifts whenever a quoting loop runs late, and two bots each keeping their own would disagree about what time it is — two symbols replaying at different speeds, unreproducibly | — |
+| 2026-09-06 | `next_ticks()` is a **lookup, not a step** | Indexing on the clock means a slow loop rejoins the market rather than walking forward through stale prices | — |
+| 2026-09-06 | The dataset's **checksum** lives in `[replay].data_sha256`, its **path** in code | *Which* prices the market replays is a domain parameter every process must agree on, so it is hashed; *where the file sits* is infrastructure. One source of truth, nothing for a sidecar to drift from | applies the 2026-08-31 config/infrastructure split |
+| 2026-09-06 | Ten symbols carry the **real tick sizes** of the instruments behind them | Four distinct values, not the provisional 1. A table where every tick size was 1 asserts all ten trade on one scale, which is what made the old block provisional | — |
+| 2026-09-06 | A symbol missing from the data file **falls back**; a data file that fails its checksum **raises** | Absent means "you are offline"; wrong means "you are about to generate a session nobody can reproduce" | — |
 | 2026-09-05 | Session lookups use a **blocking** Redis pool | redis-py's default pool *raises* when exhausted: 200 browsers reconnecting at once refused 73 of themselves. A session lookup is one local GET, so queueing is invisible and failing is a dead feed | found by `benchmarks/bench_fanout.py` |
 
 ## Deviations from the plan
@@ -179,39 +181,35 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 Task moved weeks · scope cut · estimate blown · criterion waived — with the reason. Distinct from
 decisions: a schedule deviation is not a design change.
 
-- **1.1's joint session (Appendix D.2) was an async review, not a half-day together.** Dev B
-  proposed the full contract; Dev A signed off the same day. Outcome as specified, mechanism not.
 - **3.1 Success Criterion 3 is unverified, not passing.** "A cancel that loses the race to a
   fill releases nothing" could not be constructed reliably against a live matcher. Recorded
   rather than claimed. A deterministic harness for it is a natural fit for 4.1.
-- **3.1 and 3.2 were marked `done` while four success criteria failed.** Found by audit on 2 Sep,
-  fixed the same day. A criterion is verified by exercising it, not by unit tests passing.
-- **3.3 was split.** CI, the nightly stub and multi-arch images merged as `5efe462`; the
-  deployment half (HTTPS, one-command redeploy) was deferred out of week 3 by decision and is
-  now carried behind week 5. Criteria 2 and 4 pass; 1 and 3 are untouched.
-- **Two further defects in finished Task 3.1**, found in week 4 by running it rather than reading
-  it: a sell reserved cash it never released, and nothing checked the position, so any account
-  could short. Same lesson as the week-3 audit, one week later.
-- **`RiskState.watch_stream` died on the first Redis error** — the one long-running loop with no
-  exception handling. `/health` recovered while the gateway stayed blind to the stream.
-- **5.4c's Success Criterion 5 is mechanism-verified, not profiler-verified.** "No React
-  re-render, verifiable in the React profiler" needs a human at a browser, and there is no JS
-  test framework by decision. What is proven: the buffer cannot notify, the modules cannot
-  reach React, and 1,000 messages between two frames produce exactly one paint.
-- **`resumed` is a fifth WebSocket error code, and a deviation from the frozen contract.**
-  §3.6 enumerates four codes, all failures, with no way to say a halt has *ended* — while a halt
-  clears on its own within one watchdog interval. Additive, so an unknown code is ignorable.
-  Implemented and flagged; **needs Dev A's sign-off** (HANDOFF Q2).
+- **3.3 was split.** CI, nightly and multi-arch images merged as `5efe462`; the deployment half
+  (HTTPS, one-command redeploy) was deferred out of week 3 and now sits behind week 5. Criteria
+  2 and 4 pass; 1 and 3 untouched.
+- **5.4c's Criterion 5 is mechanism-verified, not profiler-verified.** The profiler needs a human
+  at a browser and there is no JS test framework by decision. Proven instead: the buffer cannot
+  notify, the modules cannot reach React, 1,000 messages between two frames make one paint.
 - **Dev A's C++ uses neither CMake, Catch2 nor nanobind** (all in `CLAUDE.md`'s closed stack):
   a bare `g++` line, a hand-rolled `order_book_test.cpp`, a subprocess instead of a binding.
   Observed, not judged — 3.4 is Dev A's and Dev A reported it done.
 - **`stream_engine.cpp` hand-codes record sizes and field offsets** instead of including the
   generated `contracts.hpp`. `generate.py --check` cannot see a drift; only 4.1's tests can.
   Dev A asked to drive it from `schema.toml`. `HANDOFF.md` §2.
-- **Dev A edited `STATUS.md` and the append-only decision log in `e8bc8e9`.**
-- **5.2's Criterion 1 was measured on one machine, not a separated topology.** Docker Hub was
-  unreachable, so gateway, fan-out, 200 sockets and the harness shared ten cores. The median
-  (+4.2%) and the encode counts hold; the p95 and max are pessimistic — re-measure for 7.4.
+- **5.1 Criterion 2 is half met.** The ratio is in configuration, not in the stream: `schema.toml`
+  has no record type that can carry a configuration value and the contract is frozen. Needs
+  Amendment 2 and six lines in Dev A's engine (`HANDOFF.md` §3). `xfail(strict=True)`, so the
+  suite goes red the day it lands and the criterion cannot quietly stay unmet.
+- **The 31 Aug decision "config hash goes to the stream in 2.1" was never implemented.** Found
+  while designing Amendment 2, which closes it. Dev A also edited this file in `e8bc8e9`.
+- **Latent defect, found not fixed: `runner.py` documents "every inbound record produces exactly
+  one anchor" while `adapter.py` returns `[]` for unknown types.** Recovery counts anchors as its
+  bookmark, so the first type producing none makes a restarted matcher re-process an answered
+  order and duplicate a fill. Both engines carry it — dormant until Amendment 2 creates the first
+  such type, which is why that amendment forwards rather than ignores.
+- **5.2's Criterion 1 was measured on one machine, not a separated topology.** Gateway, fan-out,
+  200 sockets and the harness shared ten cores. Median (+4.2%) and encode counts hold; p95 and
+  max are pessimistic — re-measure for 7.4.
 
 ## How to run it right now
 
@@ -224,15 +222,16 @@ docker compose up -d redis postgres
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first time only
 .venv/bin/python -m uvicorn services.gateway.app:app --reload --port 8000
 
-python contracts/v1/generate.py --check    # exit 1 if generated/ is stale
-.venv/bin/python -m pytest -q               # 597 tests, against the compose stores
+python contracts/v1/generate.py --check      # exit 1 if generated/ is stale
+python scripts/fetch_market_history.py --check   # the pinned prices are the recorded ones
+.venv/bin/python -m pytest -q               # 626 tests, against the compose stores
 curl localhost:8001/health                  # fan-out: stream position, ticks, serialisations
 QA_BOT_PASSWORD=... docker compose --profile bots up -d   # a live market: makers + noise
 
 cd web && npm install && npm run dev        # frontend at localhost:5173, proxied to the gateway
 ```
-`test_sizes.py` needs a C++20 compiler and **skips loudly** without one — a green run carrying
-that skip has not verified 1.1's Success Criterion 3.
+`test_sizes.py` needs a C++20 compiler and **skips loudly** without one; a green run carrying
+that skip has not verified 1.1's Criterion 3.
 
 ## Open questions
 
@@ -244,7 +243,8 @@ that skip has not verified 1.1's Success Criterion 3.
 
 - **Week 1 — closed 31 Aug, 3 days early.** 1.1 · 1.3 · 1.4 · 5.4a. 331 tests green.
 - **Week 2 — closed 2 Sep.** 2.1 · 2.2 · 5.4b · integration point 1. 398 tests green.
-- **Week 3 — closed 4 Sep.** 3.1 · 3.2 · 3.3 (deployment half deferred). Six defects fixed.
+- **Week 3 — closed 4 Sep.** 3.1 · 3.2 · 3.3 (deployment half deferred). Six defects fixed by
+  audit and by running it; a criterion is verified by exercising it, not by unit tests passing.
 - **Week 4 (18–24 Sep) — closed 4 Sep.** Pre-work: symbol registry, rate limiting, and a ledger
   that finally runs · designated market makers · 4.4 bots · 5.2a fan-out begins · 5.4c
   WebSocket client and rAF loop. 565 tests green. Seven commits, unpushed.
