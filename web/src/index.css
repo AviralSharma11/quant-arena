@@ -192,3 +192,93 @@ button {
 .quote-bid { color: #1f5f5b; }
 .quote-ask { color: #a6472e; }
 .quote-meter { color: #7a6f63; font-size: 0.8rem; }
+
+/* --- Task 6.1a: the trading screen -----------------------------------------------------
+   No design system and no theming (Task 6.1's Boundaries). What is here is the minimum that
+   makes a book readable: aligned digits, and colour that distinguishes the two sides. */
+
+.trading-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.symbol-tabs { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #d9d0c0;
+  border-radius: 4px;
+  background: #faf7f1;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+}
+.tab.selected { border-color: #7a6f63; background: #efe9dd; font-weight: 600; }
+.tab-name { font-size: 0.75rem; letter-spacing: 0.04em; }
+.tab-price {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.trading-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(15rem, 1fr) minmax(13rem, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+/* "No responsive work beyond not breaking" — one breakpoint so a narrow window stacks
+   instead of overlapping, and nothing more. */
+@media (max-width: 60rem) {
+  .trading-grid { grid-template-columns: 1fr; }
+}
+
+.chart { height: 24rem; min-width: 0; }
+
+.book, .tape {
+  width: 100%;
+  border-collapse: collapse;
+  /* Digits that change twenty times a second must not shift the columns around them. */
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+.book td, .tape td { padding: 0.1rem 0.35rem; }
+.book .price, .tape .price { text-align: right; }
+.book .qty, .tape .qty { text-align: right; color: #4a4238; }
+.tape .time { text-align: right; color: #7a6f63; font-size: 0.78rem; }
+
+.book .ask .price { color: #a6472e; }
+.book .bid .price { color: #1f5f5b; }
+.tape tr.buy .price { color: #1f5f5b; }
+.tape tr.sell .price { color: #a6472e; }
+
+.book .spread-row td {
+  border-top: 1px solid #d9d0c0;
+  border-bottom: 1px solid #d9d0c0;
+  color: #7a6f63;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.35rem;
+}
+
+/* The depth bar sits behind its row's numbers rather than beside them, so the table keeps a
+   fixed width whatever the resting size is. */
+.book .depth-cell { width: 40%; padding: 0; }
+.depth { height: 0.85rem; border-radius: 2px; }
+.bid-depth { background: rgba(31, 95, 91, 0.18); }
+.ask-depth { background: rgba(166, 71, 46, 0.18); }
+
+.book-panel h3, .tape-panel h3, .chart-panel h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7a6f63;
+}

@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ConnectionIndicator } from "./components/ConnectionState";
-import { LiveQuote } from "./components/LiveQuote";
 import { ROUTES } from "./routes";
 import { Auth, type UserSession } from "./screens/Auth";
 import { Placeholder } from "./screens/Placeholder";
-import type { MarketBuffer } from "./stream/buffer";
-import { MOCK_SYMBOLS, startStreamSession, type StreamSession } from "./stream/session";
+import { Trading } from "./screens/Trading";
+import { startStreamSession, type StreamSession } from "./stream/session";
+import { fetchSymbols, type Symbol } from "./stream/symbols";
 import type { ConnectionState } from "./stream/types";
 
 function Nav({ user, connection }: { user: UserSession | null; connection: ConnectionState }) {
@@ -30,35 +30,6 @@ function Nav({ user, connection }: { user: UserSession | null; connection: Conne
   );
 }
 
-/**
- * The trading route, until Task 6.1 builds it properly.
- *
- * One quote strip per symbol, painted by the `requestAnimationFrame` loop rather than by
- * React — which is what makes Success Criterion 5 checkable at all. Deliberately not a book,
- * not a chart, not an order ticket: those are 6.1's, and building them here would be building
- * past the task.
- */
-function Trading({ buffer }: { buffer: MarketBuffer | null }) {
-  const route = ROUTES.find((r) => r.id === "trading")!;
-  return (
-    <>
-      <Placeholder route={route} />
-      {buffer && (
-        <section className="quotes">
-          <h2>Live quotes</h2>
-          <p className="pending">
-            Painted outside React state, on the frame loop. The message and frame counts differ
-            because the browser conflates exactly as the server does.
-          </p>
-          {MOCK_SYMBOLS.map((symbol) => (
-            <LiveQuote key={symbol} symbol={symbol} buffer={buffer} />
-          ))}
-        </section>
-      )}
-    </>
-  );
-}
-
 export default function App() {
   const [user, setUser] = useState<UserSession | null>(() => {
     try {
@@ -72,12 +43,33 @@ export default function App() {
   // Low-frequency chrome, so React state is exactly right for it. The book is not here.
   const [connection, setConnection] = useState<ConnectionState>("closed");
   const [stream, setStream] = useState<StreamSession | null>(null);
+  // The symbol table, fetched once from `GET /symbols` — §2.3's only source of names and tick
+  // sizes. React state because it arrives asynchronously and the tree genuinely depends on it,
+  // and because it is written exactly once per session.
+  const [symbols, setSymbols] = useState<readonly Symbol[]>([]);
   const resyncing = useRef(false);
 
-  // One stream for the life of the app. Started here rather than per screen so that navigating
-  // between the three does not drop and re-establish the connection.
+  // One stream for the life of the app, but it cannot start until the symbol table is known:
+  // the channels to subscribe to are derived from it. Two effects, ordered by that dependency.
   useEffect(() => {
+    let cancelled = false;
+    fetchSymbols()
+      .then((table) => {
+        if (!cancelled) setSymbols(table.symbols);
+      })
+      .catch(() => {
+        // Leave the table empty. The trading screen says so rather than inventing symbols —
+        // a client that guessed would show prices at the wrong scale (Open Issue 014 §14e).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (symbols.length === 0) return;
     const session = startStreamSession({
+      symbols,
       onState: setConnection,
       onResync: async () => {
         // A private-stream gap means this client missed an order event, so its view of open
@@ -97,7 +89,7 @@ export default function App() {
     });
     setStream(session);
     return () => session.stop();
-  }, []);
+  }, [symbols]);
 
   // Verify session on page mount
   useEffect(() => {
@@ -152,7 +144,7 @@ export default function App() {
                 route.id === "auth" ? (
                   <Auth user={user} onLogin={handleLogin} onLogout={handleLogout} />
                 ) : route.id === "trading" ? (
-                  <Trading buffer={stream?.buffer ?? null} />
+                  <Trading buffer={stream?.buffer ?? null} symbols={symbols} />
                 ) : (
                   <Placeholder route={route} />
                 )

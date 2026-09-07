@@ -23,7 +23,7 @@
  * in a buffer that lives for the length of a session is a memory leak measured in hours.
  */
 
-import type { BookMessage, Level, TapeMessage } from "./types.ts";
+import type { BarMessage, BookMessage, Level, TapeMessage } from "./types.ts";
 
 /**
  * How many prints the tape keeps. The trading screen shows a window, not a ledger — the
@@ -31,6 +31,15 @@ import type { BookMessage, Level, TapeMessage } from "./types.ts";
  * tape is not backfilled because the tape is a display.
  */
 export const TAPE_LIMIT = 200;
+
+/**
+ * How many closed candles the chart keeps in memory.
+ *
+ * At one real second to one simulated minute (Task 5.1), 600 bars is ten minutes of watching
+ * and ten simulated hours of market. Bounded for the same reason the tape is: this buffer lives
+ * for the length of a session, and an unbounded array in it is a memory leak measured in hours.
+ */
+export const BAR_LIMIT = 600;
 
 export interface BookView {
   bids: Level[];
@@ -47,10 +56,21 @@ export interface TradeView {
   seq: string;
 }
 
+export interface BarView {
+  openTicks: number;
+  highTicks: number;
+  lowTicks: number;
+  closeTicks: number;
+  volume: number;
+  barOpenNs: number;
+  seq: string;
+}
+
 export class MarketBuffer {
   private readonly books = new Map<string, BookView>();
   private readonly tapes = new Map<string, TradeView[]>();
   private readonly lastTrades = new Map<string, TradeView>();
+  private readonly bars = new Map<string, BarView[]>();
   private readonly changed = new Set<string>();
 
   /** Messages written since construction. For the render-conflation test, and for a log line. */
@@ -89,6 +109,48 @@ export class MarketBuffer {
     this.lastTrades.set(symbol, trade);
     this.changed.add(symbol);
     this.writes += 1;
+  }
+
+  /**
+   * A closed candle (§3.3). The third kind of market data, and it behaves like neither of the
+   * other two.
+   *
+   * A book message is a complete snapshot, so it **overwrites**. A print is unique, so it
+   * **accumulates**. A bar is published on close and is therefore also unique — but a repeat of
+   * the same `bar_open_ns` replaces rather than appends, because a re-delivered bar after a
+   * reconnect is the same candle, not a second one. Appending it would put a duplicate on the
+   * chart at the same x position, which is the sort of thing that looks like a data bug in the
+   * exchange rather than a bug in the client.
+   */
+  writeBar(symbol: string, message: BarMessage): void {
+    const bar: BarView = {
+      openTicks: message.open_ticks,
+      highTicks: message.high_ticks,
+      lowTicks: message.low_ticks,
+      closeTicks: message.close_ticks,
+      volume: message.volume,
+      barOpenNs: message.bar_open_ns,
+      seq: message.seq,
+    };
+    let series = this.bars.get(symbol);
+    if (series === undefined) {
+      series = [];
+      this.bars.set(symbol, series);
+    }
+    const last = series[series.length - 1];
+    if (last !== undefined && last.barOpenNs === bar.barOpenNs) {
+      series[series.length - 1] = bar;
+    } else {
+      series.push(bar);
+      if (series.length > BAR_LIMIT) series.splice(0, series.length - BAR_LIMIT);
+    }
+    this.changed.add(symbol);
+    this.writes += 1;
+  }
+
+  /** Oldest first, which is the order a chart library wants. Live, not copied. */
+  barSeries(symbol: string): readonly BarView[] {
+    return this.bars.get(symbol) ?? [];
   }
 
   book(symbol: string): BookView | undefined {
