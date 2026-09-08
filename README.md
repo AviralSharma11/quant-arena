@@ -31,7 +31,7 @@ The second command is the interesting one. Every process prints a single JSON li
 carrying the SHA-256 of the configuration it just read:
 
 ```json
-{"event":"startup","process":"gateway","config_hash":"98e81d78…","schema_version":1}
+{"event":"startup","process":"gateway","config_hash":"98e81d78…","schema_version":2}
 ```
 
 That hash makes a recorded session or a benchmark result self-describing — you can tell months
@@ -810,4 +810,3 @@ This table defines common Quant Arena terms in simple language.
 | **Observability** | The ability to understand what is happening inside a running system using logs, metrics, and traces. |
 | **CI/CD** | Automation that helps test, build, and deploy software changes. |
 | **Sandbox / Isolated Execution Environment** | A restricted environment used to safely run potentially unsafe code, such as user-created strategies. |
-

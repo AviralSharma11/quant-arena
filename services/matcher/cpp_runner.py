@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import os
 import struct
+import time
 
 from redis.asyncio import Redis
 
@@ -102,6 +103,7 @@ class CppMatcher:
         self.engine = CppEngineProcess(initial_cash_ticks=settings.initial_cash_ticks)
         self.last_inbound_id = "0-0"
         self.records_answered = 0
+        self.last_recovery_seconds: float | None = None
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -117,27 +119,31 @@ class CppMatcher:
 
     async def recover(self) -> int:
         """Rebuild the C++ process from answered inbound records without appending outputs."""
-        already_answered = await self._count_anchors()
-        await self.engine.stop()
-        self.engine = CppEngineProcess(initial_cash_ticks=self.settings.initial_cash_ticks)
-        await self.engine.start()
-        last_id, replayed = "0-0", 0
-        while replayed < already_answered:
-            batch = await self._read(self.settings.stream_inbound, last_id)
-            if not batch:
-                raise RuntimeError(
-                    "outbound anchors exceed retained inbound records; "
-                    "cannot recover the C++ engine safely"
-                )
-            for item in batch:
-                if replayed >= already_answered:
-                    break
-                await self.engine.apply(item.record)
-                last_id = item.stream_id
-                replayed += 1
-        self.last_inbound_id = last_id
-        self.records_answered = replayed
-        return replayed
+        started = time.perf_counter()
+        try:
+            already_answered = await self._count_anchors()
+            await self.engine.stop()
+            self.engine = CppEngineProcess(initial_cash_ticks=self.settings.initial_cash_ticks)
+            await self.engine.start()
+            last_id, replayed = "0-0", 0
+            while replayed < already_answered:
+                batch = await self._read(self.settings.stream_inbound, last_id)
+                if not batch:
+                    raise RuntimeError(
+                        "outbound anchors exceed retained inbound records; "
+                        "cannot recover the C++ engine safely"
+                    )
+                for item in batch:
+                    if replayed >= already_answered:
+                        break
+                    await self.engine.apply(item.record)
+                    last_id = item.stream_id
+                    replayed += 1
+            self.last_inbound_id = last_id
+            self.records_answered = replayed
+            return replayed
+        finally:
+            self.last_recovery_seconds = time.perf_counter() - started
 
     async def step(self) -> int:
         await self.engine.start()
@@ -193,7 +199,10 @@ async def main() -> None:
     halt = HaltState()
     matcher = CppMatcher(redis, settings, halt=halt)
     replayed = await matcher.recover()
-    print(f"cpp-matcher: replayed {replayed} inbound records, resuming at {matcher.last_inbound_id}")
+    print(
+        f"cpp-matcher: replayed {replayed} inbound records in "
+        f"{matcher.last_recovery_seconds:.6f}s, resuming at {matcher.last_inbound_id}"
+    )
     watchdog = asyncio.create_task(
         watch_health(redis, halt, poll_ms=settings.stream_health_poll_ms),
         name="cpp-matcher-halt-watchdog",

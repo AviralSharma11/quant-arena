@@ -129,26 +129,14 @@ def test_the_replay_ratio_is_configured(settings: Settings):
     assert settings.replay_real_seconds_per_simulated_minute == 1
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Criterion 2's stream half needs Amendment 2 — a ConfigureReplay/ReplayConfigured pair "
-        "and six lines in engine/cpp/stream_engine.cpp. Agreed in principle, awaiting Dev A. "
-        "See HANDOFF.md section 3."
-    ),
-    strict=True,
-)
 def test_the_replay_ratio_reaches_the_stream():
-    """Deliberately failing, not skipped and not deleted.
-
-    `schema.toml` has no record type that can carry a configuration value, so there is nowhere
-    for the ratio to live on the stream until the amendment lands. Marked `strict` so that the
-    day Dev A's six lines arrive, this test starts XPASSing and the suite fails until the
-    criterion is actually asserted — an unmet criterion that goes quiet is how 3.1 and 3.2 came
-    to be marked done with four criteria failing.
-    """
+    """The fixed-width stream records carry both the replay ratio and configuration identity."""
     from contracts.v1.generated import contracts
 
-    assert hasattr(contracts, "ConfigureReplay")
+    assert contracts.ConfigureReplay.SIZE == 60
+    assert contracts.ReplayConfigured.SIZE == 60
+    assert contracts.ConfigureReplay.RECORD_TYPE == contracts.RecordType.CONFIGURE_REPLAY
+    assert contracts.ReplayConfigured.RECORD_TYPE == contracts.RecordType.REPLAY_CONFIGURED
 
 
 # --- Criterion 3: fully offline from pinned data ---------------------------------------------

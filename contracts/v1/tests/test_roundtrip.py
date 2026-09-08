@@ -111,8 +111,29 @@ def test_unpack_any_dispatches_on_record_type(cls):
 
 def test_unpack_any_refuses_an_unknown_record_type():
     data = bytearray(contracts.SubmitOrder.SIZE)
+    struct.pack_into(
+        "<H", data, contracts.SubmitOrder.OFFSETS["schema_version"], contracts.SCHEMA_VERSION
+    )
     struct.pack_into("<H", data, contracts.SubmitOrder.OFFSETS["record_type"], 9999)
     with pytest.raises(ValueError, match="unknown record_type"):
+        contracts.unpack_any(bytes(data))
+
+
+def test_unpack_any_refuses_an_unsupported_schema_version():
+    record = contracts.SubmitOrder.new(
+        timestamp_ns=1,
+        client_order_id=1,
+        user_id=2,
+        price_ticks=3,
+        qty=4,
+        symbol_id=5,
+        side=contracts.Side.BUY,
+        tif=contracts.Tif.GTC,
+    )
+    data = bytearray(record.pack())
+    struct.pack_into("<H", data, contracts.SubmitOrder.OFFSETS["schema_version"], 999)
+
+    with pytest.raises(ValueError, match="unsupported schema_version"):
         contracts.unpack_any(bytes(data))
 
 

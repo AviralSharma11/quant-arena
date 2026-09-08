@@ -116,12 +116,12 @@ def test_every_record_is_inbound_or_outbound():
 
 
 def test_the_expected_record_set_is_present():
-    """Open Issue 016 sub-decision 16c names these exactly. A missing one is a contract gap;
-    an extra one is scope creep."""
+    """The frozen records plus the agreed replay-configuration amendment are all present."""
     expected = {
         "SubmitOrder", "CancelOrder", "CreateAccount", "CreditCash",
+        "ConfigureReplay",
         "OrderAccepted", "OrderRejected", "Fill", "OrderCancelled", "BookChanged",
-        "AccountCreated", "CashCredited",
+        "AccountCreated", "CashCredited", "ReplayConfigured",
     }
     assert {r["name"] for r in RECORDS} == expected
 

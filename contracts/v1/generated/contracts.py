@@ -1,7 +1,7 @@
 # GENERATED FILE — DO NOT EDIT.
 #
 # Source:     contracts/v1/schema.toml
-# Source sha: d2b618e33b38860404c7fbda30403a18deb989887a91bd1b13ced9bbea3779fb
+# Source sha: 2a6b0aa5c0e59e8e299ea6ef3265fd9536339ce4a5537b5886658c4b923079e1
 # Regenerate: python contracts/v1/generate.py
 #
 # Hand-editing this file reintroduces exactly the C++/Python drift the generator exists to
@@ -19,7 +19,7 @@ import struct
 from enum import IntEnum
 from typing import NamedTuple
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: A record's seq is the Redis stream id, which does not exist until XADD returns.
 #: Producers write SEQ_UNASSIGNED; consumers fill it in from the message id on read.
@@ -35,6 +35,7 @@ class RecordType(IntEnum):
     CANCEL_ORDER = 2  # CancelOrder
     CREATE_ACCOUNT = 3  # CreateAccount
     CREDIT_CASH = 4  # CreditCash
+    CONFIGURE_REPLAY = 5  # ConfigureReplay
     ORDER_ACCEPTED = 10  # OrderAccepted
     ORDER_REJECTED = 11  # OrderRejected
     FILL = 12  # Fill
@@ -42,6 +43,7 @@ class RecordType(IntEnum):
     BOOK_CHANGED = 14  # BookChanged
     ACCOUNT_CREATED = 15  # AccountCreated
     CASH_CREDITED = 16  # CashCredited
+    REPLAY_CONFIGURED = 17  # ReplayConfigured
 
 
 class Side(IntEnum):
@@ -324,6 +326,67 @@ class CreditCash(NamedTuple):
 
 _S_CreditCash = struct.Struct(CreditCash.FORMAT)
 assert _S_CreditCash.size == CreditCash.SIZE, "CreditCash: format string and SIZE disagree"
+
+
+class ConfigureReplay(NamedTuple):
+    """
+    The replay clock and configuration hash, written by the gateway at startup. Forwarded by the
+    engine untouched so this configuration has a position in the total order and preserves the
+    one-anchor-per-inbound-record recovery invariant.
+
+    Direction: inbound. record_type = 5.
+    """
+
+    schema_version: int  # Version of this schema. Consumers accept the current version only.
+    record_type: int  # Discriminator. Fixed offset across every record.
+    seq_ms: int  # Redis stream id, millisecond part. 0 until assigned on read.
+    seq_ord: int  # Redis stream id, ordinal part. 0 until assigned on read.
+    timestamp_ns: int  # Gateway-assigned wall clock, nanoseconds.
+    client_order_id: int  # Reserved startup idempotency key.
+    real_seconds_per_simulated_minute: int
+    config_hash_hi: int  # First 8 bytes of the SHA-256, big-endian.
+    config_hash_lo: int  # Next 8 bytes of the SHA-256, big-endian.
+
+    FORMAT = "<HHQQqQqQQ"
+    SIZE = 60
+    RECORD_TYPE = 5
+    OFFSETS = {
+        "schema_version": 0,
+        "record_type": 2,
+        "seq_ms": 4,
+        "seq_ord": 12,
+        "timestamp_ns": 20,
+        "client_order_id": 28,
+        "real_seconds_per_simulated_minute": 36,
+        "config_hash_hi": 44,
+        "config_hash_lo": 52,
+    }
+
+    @classmethod
+    def new(cls, *, timestamp_ns: int, client_order_id: int, real_seconds_per_simulated_minute: int, config_hash_hi: int, config_hash_lo: int) -> "ConfigureReplay":
+        """Build a record with the header filled in correctly and seq unassigned."""
+        return cls(
+            schema_version=SCHEMA_VERSION,
+            record_type=5,
+            seq_ms=SEQ_UNASSIGNED,
+            seq_ord=SEQ_UNASSIGNED,
+            timestamp_ns=timestamp_ns,
+            client_order_id=client_order_id,
+            real_seconds_per_simulated_minute=real_seconds_per_simulated_minute,
+            config_hash_hi=config_hash_hi,
+            config_hash_lo=config_hash_lo,
+        )
+
+    def pack(self) -> bytes:
+        return _S_ConfigureReplay.pack(*self)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "ConfigureReplay":
+        return cls(*_S_ConfigureReplay.unpack(data))
+
+
+_S_ConfigureReplay = struct.Struct(ConfigureReplay.FORMAT)
+assert _S_ConfigureReplay.size == ConfigureReplay.SIZE, "ConfigureReplay: format string and SIZE disagree"
 
 
 class OrderAccepted(NamedTuple):
@@ -769,12 +832,72 @@ _S_CashCredited = struct.Struct(CashCredited.FORMAT)
 assert _S_CashCredited.size == CashCredited.SIZE, "CashCredited: format string and SIZE disagree"
 
 
+class ReplayConfigured(NamedTuple):
+    """
+    Forwarded replay configuration, now sequenced.
+
+    Direction: outbound. record_type = 17.
+    """
+
+    schema_version: int  # Version of this schema. Consumers accept the current version only.
+    record_type: int  # Discriminator. Fixed offset across every record.
+    seq_ms: int  # Redis stream id, millisecond part. 0 until assigned on read.
+    seq_ord: int  # Redis stream id, ordinal part. 0 until assigned on read.
+    timestamp_ns: int  # Gateway-assigned wall clock, nanoseconds.
+    client_order_id: int
+    real_seconds_per_simulated_minute: int
+    config_hash_hi: int
+    config_hash_lo: int
+
+    FORMAT = "<HHQQqQqQQ"
+    SIZE = 60
+    RECORD_TYPE = 17
+    OFFSETS = {
+        "schema_version": 0,
+        "record_type": 2,
+        "seq_ms": 4,
+        "seq_ord": 12,
+        "timestamp_ns": 20,
+        "client_order_id": 28,
+        "real_seconds_per_simulated_minute": 36,
+        "config_hash_hi": 44,
+        "config_hash_lo": 52,
+    }
+
+    @classmethod
+    def new(cls, *, timestamp_ns: int, client_order_id: int, real_seconds_per_simulated_minute: int, config_hash_hi: int, config_hash_lo: int) -> "ReplayConfigured":
+        """Build a record with the header filled in correctly and seq unassigned."""
+        return cls(
+            schema_version=SCHEMA_VERSION,
+            record_type=17,
+            seq_ms=SEQ_UNASSIGNED,
+            seq_ord=SEQ_UNASSIGNED,
+            timestamp_ns=timestamp_ns,
+            client_order_id=client_order_id,
+            real_seconds_per_simulated_minute=real_seconds_per_simulated_minute,
+            config_hash_hi=config_hash_hi,
+            config_hash_lo=config_hash_lo,
+        )
+
+    def pack(self) -> bytes:
+        return _S_ReplayConfigured.pack(*self)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "ReplayConfigured":
+        return cls(*_S_ReplayConfigured.unpack(data))
+
+
+_S_ReplayConfigured = struct.Struct(ReplayConfigured.FORMAT)
+assert _S_ReplayConfigured.size == ReplayConfigured.SIZE, "ReplayConfigured: format string and SIZE disagree"
+
+
 #: record_type -> record class.
 RECORD_BY_TYPE = {
     1: SubmitOrder,
     2: CancelOrder,
     3: CreateAccount,
     4: CreditCash,
+    5: ConfigureReplay,
     10: OrderAccepted,
     11: OrderRejected,
     12: Fill,
@@ -782,11 +905,18 @@ RECORD_BY_TYPE = {
     14: BookChanged,
     15: AccountCreated,
     16: CashCredited,
+    17: ReplayConfigured,
 }
 
 ALL_RECORDS = tuple(RECORD_BY_TYPE.values())
 
 _RECORD_TYPE_OFFSET = 2
+_SCHEMA_VERSION_OFFSET = 0
+
+
+def peek_schema_version(data: bytes) -> int:
+    """Read the schema version before dispatching a packed record."""
+    return struct.unpack_from("<H", data, _SCHEMA_VERSION_OFFSET)[0]
 
 
 def peek_record_type(data: bytes) -> int:
@@ -795,7 +925,12 @@ def peek_record_type(data: bytes) -> int:
 
 
 def unpack_any(data: bytes):
-    """Unpack a record of any type, dispatching on record_type."""
+    """Unpack a current-version record of any type, dispatching on record_type."""
+    schema_version = peek_schema_version(data)
+    if schema_version != SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported schema_version {schema_version}; expected {SCHEMA_VERSION}"
+        )
     record_type = peek_record_type(data)
     cls = RECORD_BY_TYPE.get(record_type)
     if cls is None:

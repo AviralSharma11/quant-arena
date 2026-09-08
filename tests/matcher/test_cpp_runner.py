@@ -10,12 +10,14 @@ from contracts.v1.generated.contracts import (
     AccountCreated,
     CancelOrder,
     CashCredited,
+    ConfigureReplay,
     CreateAccount,
     CreditCash,
     Fill,
     OrderCancelled,
     OrderRejected,
     RejectReason,
+    ReplayConfigured,
     Side,
     SubmitOrder,
     Tif,
@@ -191,6 +193,35 @@ async def test_cpp_worker_forwards_account_and_cash_records(monkeypatch):
     assert credited[0].amount_ticks == 55
 
 
+async def test_cpp_worker_forwards_replay_configuration(monkeypatch):
+    executable = _engine_path()
+    if executable is None:
+        pytest.skip("build engine/cpp/quant_arena_engine before running C++ worker tests")
+    monkeypatch.setenv("QA_CPP_ENGINE_PATH", str(executable))
+
+    engine = CppEngineProcess(initial_cash_ticks=1_000_000)
+    await engine.start()
+    try:
+        configured = await engine.apply(
+            ConfigureReplay.new(
+                timestamp_ns=4,
+                client_order_id=0,
+                real_seconds_per_simulated_minute=1,
+                config_hash_hi=11,
+                config_hash_lo=22,
+            )
+        )
+    finally:
+        await engine.stop()
+
+    assert len(configured) == 1
+    assert isinstance(configured[0], ReplayConfigured)
+    assert configured[0].timestamp_ns == 4
+    assert configured[0].real_seconds_per_simulated_minute == 1
+    assert configured[0].config_hash_hi == 11
+    assert configured[0].config_hash_lo == 22
+
+
 async def test_cpp_matcher_recovers_without_duplicate_outbound_records(
     settings, clean_redis, monkeypatch
 ):
@@ -200,6 +231,13 @@ async def test_cpp_matcher_recovers_without_duplicate_outbound_records(
     monkeypatch.setenv("QA_CPP_ENGINE_PATH", str(executable))
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
     inbound = [
+        ConfigureReplay.new(
+            timestamp_ns=0,
+            client_order_id=0,
+            real_seconds_per_simulated_minute=1,
+            config_hash_hi=11,
+            config_hash_lo=22,
+        ),
         SubmitOrder.new(
             timestamp_ns=1, client_order_id=1, user_id=10, symbol_id=1,
             side=Side.BUY, tif=Tif.GTC, price_ticks=100, qty=5,
@@ -236,7 +274,9 @@ async def test_cpp_matcher_recovers_without_duplicate_outbound_records(
 
     before = await outbound()
     second = CppMatcher(redis, settings)
-    assert await second.recover() == 2
+    assert await second.recover() == 3
+    assert second.last_recovery_seconds is not None
+    assert second.last_recovery_seconds >= 0
     assert await outbound() == before
     second.producer.start()
     assert await second.step() == 0
@@ -244,5 +284,5 @@ async def test_cpp_matcher_recovers_without_duplicate_outbound_records(
     await redis.aclose()
 
     assert [type(record).__name__ for record in before] == [
-        "OrderAccepted", "OrderAccepted", "Fill"
+        "ReplayConfigured", "OrderAccepted", "OrderAccepted", "Fill"
     ]

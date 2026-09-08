@@ -25,12 +25,14 @@ if str(REPO_ROOT) not in sys.path:
 from config.settings import Settings  # noqa: E402
 from contracts.v1.generated.contracts import (  # noqa: E402
     CancelOrder,
+    ConfigureReplay,
     Fill,
     OrderAccepted,
     OrderCancelled,
     Side,
     SubmitOrder,
     Tif,
+    ReplayConfigured,
 )
 from services.gateway.streams import (  # noqa: E402
     HaltState,
@@ -104,6 +106,42 @@ async def test_a_crossing_pair_produces_one_fill_on_the_outbound_stream(
     assert fill.price_ticks == 100 and fill.qty == 5
     # `seq` is stamped from the Redis stream id on read, never authored (Open Issue 003).
     assert fill.seq_ms > 0
+
+
+async def test_replay_configuration_is_ordered_and_recovered_once(
+    settings: Settings, clean_redis
+):
+    config = ConfigureReplay.new(
+        timestamp_ns=1,
+        client_order_id=0,
+        real_seconds_per_simulated_minute=1,
+        config_hash_hi=11,
+        config_hash_lo=22,
+    )
+    redis = await feed(settings, [config, submit(
+        coid=1, user=10, side=BUY, price=100, qty=5, ts=2
+    )])
+    first = Matcher(redis, settings)
+    first.producer.start()
+    await drain(first)
+    await first.producer.stop()
+
+    before = await outbound(redis, settings)
+    assert [type(record).__name__ for record in before] == [
+        "ReplayConfigured", "OrderAccepted"
+    ]
+
+    second = Matcher(redis, settings)
+    assert await second.recover() == 2
+    assert second.last_recovery_seconds is not None
+    assert second.last_recovery_seconds >= 0
+    assert await outbound(redis, settings) == before
+    await redis.aclose()
+
+    replayed_config = before[0]
+    assert isinstance(replayed_config, ReplayConfigured)
+    assert replayed_config.config_hash_hi == 11
+    assert replayed_config.config_hash_lo == 22
 
 
 async def test_the_gateway_writes_and_the_matcher_answers(settings: Settings, clean_redis):

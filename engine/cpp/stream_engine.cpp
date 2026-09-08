@@ -54,6 +54,9 @@ contracts::RecordHeader unpack_header(const Bytes& data) {
     }
     contracts::RecordHeader header{};
     std::memcpy(&header, data.data(), sizeof(header));
+    if (header.schema_version != contracts::SCHEMA_VERSION) {
+        throw std::runtime_error("unsupported schema version");
+    }
     return header;
 }
 
@@ -135,6 +138,8 @@ public:
             return create_account(unpack_record<contracts::CreateAccount>(record));
         case contracts::RecordType::CREDIT_CASH:
             return credit_cash(unpack_record<contracts::CreditCash>(record));
+        case contracts::RecordType::CONFIGURE_REPLAY:
+            return configure_replay(unpack_record<contracts::ConfigureReplay>(record));
         default:
             return {};
         }
@@ -338,6 +343,17 @@ private:
         output.client_order_id = input.client_order_id;
         output.user_id = input.user_id;
         output.amount_ticks = input.amount_ticks;
+        return {pack_record(output)};
+    }
+
+    std::vector<Bytes> configure_replay(const contracts::ConfigureReplay& input) const {
+        auto output =
+            new_record<contracts::ReplayConfigured>(contracts::RecordType::REPLAY_CONFIGURED);
+        output.timestamp_ns = input.timestamp_ns;
+        output.client_order_id = input.client_order_id;
+        output.real_seconds_per_simulated_minute = input.real_seconds_per_simulated_minute;
+        output.config_hash_hi = input.config_hash_hi;
+        output.config_hash_lo = input.config_hash_lo;
         return {pack_record(output)};
     }
 

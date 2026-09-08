@@ -1,7 +1,7 @@
 // GENERATED FILE — DO NOT EDIT.
 //
 // Source:     contracts/v1/schema.toml
-// Source sha: d2b618e33b38860404c7fbda30403a18deb989887a91bd1b13ced9bbea3779fb
+// Source sha: 2a6b0aa5c0e59e8e299ea6ef3265fd9536339ce4a5537b5886658c4b923079e1
 // Regenerate: python contracts/v1/generate.py
 //
 // Hand-editing this file reintroduces exactly the C++/Python drift the generator exists to
@@ -57,6 +57,16 @@ int main() {
   std::printf("offset CreditCash client_order_id %zu\n", offsetof(CreditCash, client_order_id));
   std::printf("offset CreditCash user_id %zu\n", offsetof(CreditCash, user_id));
   std::printf("offset CreditCash amount_ticks %zu\n", offsetof(CreditCash, amount_ticks));
+  std::printf("size ConfigureReplay %zu\n", sizeof(ConfigureReplay));
+  std::printf("offset ConfigureReplay schema_version %zu\n", offsetof(ConfigureReplay, schema_version));
+  std::printf("offset ConfigureReplay record_type %zu\n", offsetof(ConfigureReplay, record_type));
+  std::printf("offset ConfigureReplay seq_ms %zu\n", offsetof(ConfigureReplay, seq_ms));
+  std::printf("offset ConfigureReplay seq_ord %zu\n", offsetof(ConfigureReplay, seq_ord));
+  std::printf("offset ConfigureReplay timestamp_ns %zu\n", offsetof(ConfigureReplay, timestamp_ns));
+  std::printf("offset ConfigureReplay client_order_id %zu\n", offsetof(ConfigureReplay, client_order_id));
+  std::printf("offset ConfigureReplay real_seconds_per_simulated_minute %zu\n", offsetof(ConfigureReplay, real_seconds_per_simulated_minute));
+  std::printf("offset ConfigureReplay config_hash_hi %zu\n", offsetof(ConfigureReplay, config_hash_hi));
+  std::printf("offset ConfigureReplay config_hash_lo %zu\n", offsetof(ConfigureReplay, config_hash_lo));
   std::printf("size OrderAccepted %zu\n", sizeof(OrderAccepted));
   std::printf("offset OrderAccepted schema_version %zu\n", offsetof(OrderAccepted, schema_version));
   std::printf("offset OrderAccepted record_type %zu\n", offsetof(OrderAccepted, record_type));
@@ -135,5 +145,15 @@ int main() {
   std::printf("offset CashCredited client_order_id %zu\n", offsetof(CashCredited, client_order_id));
   std::printf("offset CashCredited user_id %zu\n", offsetof(CashCredited, user_id));
   std::printf("offset CashCredited amount_ticks %zu\n", offsetof(CashCredited, amount_ticks));
+  std::printf("size ReplayConfigured %zu\n", sizeof(ReplayConfigured));
+  std::printf("offset ReplayConfigured schema_version %zu\n", offsetof(ReplayConfigured, schema_version));
+  std::printf("offset ReplayConfigured record_type %zu\n", offsetof(ReplayConfigured, record_type));
+  std::printf("offset ReplayConfigured seq_ms %zu\n", offsetof(ReplayConfigured, seq_ms));
+  std::printf("offset ReplayConfigured seq_ord %zu\n", offsetof(ReplayConfigured, seq_ord));
+  std::printf("offset ReplayConfigured timestamp_ns %zu\n", offsetof(ReplayConfigured, timestamp_ns));
+  std::printf("offset ReplayConfigured client_order_id %zu\n", offsetof(ReplayConfigured, client_order_id));
+  std::printf("offset ReplayConfigured real_seconds_per_simulated_minute %zu\n", offsetof(ReplayConfigured, real_seconds_per_simulated_minute));
+  std::printf("offset ReplayConfigured config_hash_hi %zu\n", offsetof(ReplayConfigured, config_hash_hi));
+  std::printf("offset ReplayConfigured config_hash_lo %zu\n", offsetof(ReplayConfigured, config_hash_lo));
   return 0;
 }
