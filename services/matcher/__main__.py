@@ -31,7 +31,10 @@ async def main() -> None:
     matcher = Matcher(redis, settings, halt=halt)
 
     replayed = await matcher.recover()
-    print(f"matcher: replayed {replayed} inbound records, resuming at {matcher.last_inbound_id}")
+    print(
+        f"matcher: replayed {replayed} inbound records in "
+        f"{matcher.last_recovery_seconds:.6f}s, resuming at {matcher.last_inbound_id}"
+    )
 
     watchdog = asyncio.create_task(
         watch_health(redis, halt, poll_ms=settings.stream_health_poll_ms),

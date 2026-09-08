@@ -17,10 +17,12 @@ from contracts.v1.generated.contracts import (  # noqa: E402
     CancelOrder,
     CancelReason,
     Fill,
+    ConfigureReplay,
     OrderAccepted,
     OrderCancelled,
     OrderRejected,
     RejectReason,
+    ReplayConfigured,
     Side,
     SubmitOrder,
     Tif,
@@ -51,6 +53,26 @@ def test_a_resting_order_is_accepted_and_does_not_trade():
     assert out[0].client_order_id == 1
     # The engine never reads a clock: the outbound record echoes the inbound timestamp.
     assert out[0].timestamp_ns == 1
+
+
+def test_replay_configuration_is_forwarded_as_one_anchor():
+    record = ConfigureReplay.new(
+        timestamp_ns=7,
+        client_order_id=0,
+        real_seconds_per_simulated_minute=1,
+        config_hash_hi=0x0123456789ABCDEF,
+        config_hash_lo=0xFEDCBA9876543210,
+    )
+
+    output = NaiveMatcher().apply(record)
+
+    assert len(output) == 1
+    assert isinstance(output[0], ReplayConfigured)
+    assert output[0].timestamp_ns == record.timestamp_ns
+    assert output[0].client_order_id == record.client_order_id
+    assert output[0].real_seconds_per_simulated_minute == 1
+    assert output[0].config_hash_hi == record.config_hash_hi
+    assert output[0].config_hash_lo == record.config_hash_lo
 
 
 def test_two_crossing_orders_produce_exactly_one_fill():

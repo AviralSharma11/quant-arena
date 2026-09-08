@@ -36,6 +36,7 @@ answered. Same code path as normal operation, which is the property Task 4.2 wil
 from __future__ import annotations
 
 import asyncio
+import time
 
 from redis.asyncio import Redis
 
@@ -44,6 +45,7 @@ from contracts.v1.generated.contracts import (
     AccountCreated,
     CancelReason,
     CashCredited,
+    ReplayConfigured,
     OrderAccepted,
     OrderCancelled,
     OrderRejected,
@@ -54,7 +56,10 @@ from services.matcher.adapter import NaiveMatcher
 
 def is_anchor(record) -> bool:
     """Exactly one of these is emitted per inbound record. See the module docstring."""
-    if isinstance(record, (OrderAccepted, OrderRejected, AccountCreated, CashCredited)):
+    if isinstance(
+        record,
+        (OrderAccepted, OrderRejected, AccountCreated, CashCredited, ReplayConfigured),
+    ):
         return True
     if isinstance(record, OrderCancelled):
         return int(record.reason) == int(CancelReason.USER_REQUESTED)
@@ -90,6 +95,7 @@ class Matcher:
         #: Where the inbound tail resumes. Set by `recover()`, advanced by `run()`.
         self.last_inbound_id = "0-0"
         self.records_answered = 0
+        self.last_recovery_seconds: float | None = None
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -113,28 +119,32 @@ class Matcher:
 
         Nothing is appended: the outbound records for these inputs are already on the stream.
         """
-        already_answered = await self._count_anchors()
-        self.matcher = self._new_matcher()
-        self.records_answered = 0
-        last_id, replayed = "0-0", 0
+        started = time.perf_counter()
+        try:
+            already_answered = await self._count_anchors()
+            self.matcher = self._new_matcher()
+            self.records_answered = 0
+            last_id, replayed = "0-0", 0
 
-        while replayed < already_answered:
-            batch = await self._read(self.settings.stream_inbound, last_id)
-            if not batch:
-                # The outbound stream claims more answers than the inbound stream has records.
-                # Only trimming can do that, and rebuilding past a trim point is not something
-                # to paper over silently — Phase 1 replays the whole retained stream or fails.
-                break
-            for item in batch:
-                if replayed >= already_answered:
+            while replayed < already_answered:
+                batch = await self._read(self.settings.stream_inbound, last_id)
+                if not batch:
+                    # The outbound stream claims more answers than the inbound stream has records.
+                    # Only trimming can do that, and rebuilding past a trim point is not something
+                    # to paper over silently — Phase 1 replays the whole retained stream or fails.
                     break
-                self.matcher.apply(item.record)
-                last_id = item.stream_id
-                replayed += 1
+                for item in batch:
+                    if replayed >= already_answered:
+                        break
+                    self.matcher.apply(item.record)
+                    last_id = item.stream_id
+                    replayed += 1
 
-        self.last_inbound_id = last_id
-        self.records_answered = replayed
-        return replayed
+            self.last_inbound_id = last_id
+            self.records_answered = replayed
+            return replayed
+        finally:
+            self.last_recovery_seconds = time.perf_counter() - started
 
     # -- the live loop -------------------------------------------------------------------------
 

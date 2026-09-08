@@ -38,12 +38,14 @@ from contracts.v1.generated.contracts import (
     CancelOrder,
     CancelReason,
     CashCredited,
+    ConfigureReplay,
     CreateAccount,
     CreditCash,
     Fill,
     OrderAccepted,
     OrderCancelled,
     OrderRejected,
+    ReplayConfigured,
     RejectReason,
     Side,
     SubmitOrder,
@@ -55,7 +57,13 @@ from engine.naive_model import Side as ModelSide
 
 #: Outbound records are `NamedTuple`s with no common base, so the union is spelled out.
 Outbound = (
-    OrderAccepted | OrderRejected | Fill | OrderCancelled | AccountCreated | CashCredited
+    OrderAccepted
+    | OrderRejected
+    | Fill
+    | OrderCancelled
+    | AccountCreated
+    | CashCredited
+    | ReplayConfigured
 )
 
 _SIDE_TO_MODEL = {int(Side.BUY): ModelSide.BUY, int(Side.SELL): ModelSide.SELL}
@@ -134,13 +142,13 @@ class NaiveMatcher:
             return self._submit(record)
         if isinstance(record, CancelOrder):
             return self._cancel(record)
-        if isinstance(record, (CreateAccount, CreditCash)):
+        if isinstance(record, (CreateAccount, CreditCash, ConfigureReplay)):
             return self._forward(record)
         # Anything else is a record type this engine has no opinion about. Ignoring it keeps
         # the matcher tolerant of a stream that grows types it does not act on.
         return []
 
-    def _forward(self, record: CreateAccount | CreditCash) -> list[Outbound]:
+    def _forward(self, record: CreateAccount | CreditCash | ConfigureReplay) -> list[Outbound]:
         """Money records cross the engine untouched, and come out sequenced.
 
         The schema is explicit about this: `CreateAccount` is *"forwarded by the engine
@@ -163,12 +171,22 @@ class NaiveMatcher:
                     initial_cash_ticks=self._initial_cash_ticks,
                 )
             ]
+        if isinstance(record, CreditCash):
+            return [
+                CashCredited.new(
+                    timestamp_ns=record.timestamp_ns,
+                    client_order_id=record.client_order_id,
+                    user_id=record.user_id,
+                    amount_ticks=record.amount_ticks,
+                )
+            ]
         return [
-            CashCredited.new(
+            ReplayConfigured.new(
                 timestamp_ns=record.timestamp_ns,
                 client_order_id=record.client_order_id,
-                user_id=record.user_id,
-                amount_ticks=record.amount_ticks,
+                real_seconds_per_simulated_minute=record.real_seconds_per_simulated_minute,
+                config_hash_hi=record.config_hash_hi,
+                config_hash_lo=record.config_hash_lo,
             )
         ]
 

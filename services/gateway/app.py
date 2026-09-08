@@ -9,6 +9,7 @@ about a session lives on the app object.
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -23,6 +24,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from config.settings import Settings
 from config.settings import settings as default_settings
 from config.startup import log_startup
+from contracts.v1.generated.contracts import ConfigureReplay
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
 from services.gateway.idempotency import IdempotencyStore
 from services.gateway.ratelimit import RateLimiter
@@ -39,6 +41,21 @@ from services.gateway.streams import (
     StreamProducer,
     watch_health,
 )
+
+REPLAY_CONFIGURATION_CLIENT_ORDER_ID = 0
+
+
+def _replay_configuration(settings: Settings) -> ConfigureReplay:
+    digest = bytes.fromhex(settings.config_hash)
+    if len(digest) < 16:
+        raise ValueError("configuration hash must contain at least 16 bytes")
+    return ConfigureReplay.new(
+        timestamp_ns=time.time_ns(),
+        client_order_id=REPLAY_CONFIGURATION_CLIENT_ORDER_ID,
+        real_seconds_per_simulated_minute=settings.replay_real_seconds_per_simulated_minute,
+        config_hash_hi=int.from_bytes(digest[:8], "big"),
+        config_hash_lo=int.from_bytes(digest[8:16], "big"),
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -85,6 +102,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             batch_max=settings.stream_batch_max,
         )
         app.state.streams.start()
+        # Stamp the configuration into the same total order as orders. The matcher forwards this
+        # record, so recovery can count it as the anchor for the inbound startup record.
+        app.state.replay_config_seq = await app.state.streams.append(
+            settings.stream_inbound,
+            _replay_configuration(settings),
+        )
         risk_stop = asyncio.Event()
         app.state.risk_task = asyncio.create_task(
             app.state.risk.watch_stream(

@@ -101,7 +101,7 @@ the only thing that maps `symbol_id` on the wire to something a human reads.
 { "symbols": [ { "symbol_id": 1, "name": "BTC", "tick_size_ticks": 1, "lot_size": 1 } ],
   "enums": { "side": {"BUY": 1, "SELL": 2}, "tif": {"GTC": 1, "IOC": 2},
              "reject_reason": { "UNKNOWN_SYMBOL": 1 } },
-  "schema_version": 1 }
+  "schema_version": 2 }
 ```
 
 Serving the enum tables here means the frontend never hard-codes an integer that the schema owns.

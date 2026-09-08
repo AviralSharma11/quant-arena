@@ -11,7 +11,7 @@ import redis as redis_sync
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from contracts.v1.generated.contracts import CreateAccount, unpack_any
+from contracts.v1.generated.contracts import ConfigureReplay, CreateAccount, unpack_any
 from services.gateway.security import ARGON2ID_PREFIX
 from services.gateway.streams import RECORD_FIELD
 from services.ledger.consumer import LedgerConsumer
@@ -25,14 +25,16 @@ def _rows(sql: str, params: tuple = ()) -> list[tuple]:
 
 
 def _one_inbound_record(settings):
-    """The single record the gateway appended, unpacked."""
+    """Return the registration record, excluding the gateway startup configuration stamp."""
     r = redis_sync.Redis.from_url(settings.redis_url)
     try:
         entries = r.xrange(settings.stream_inbound, "-", "+")
     finally:
         r.close()
-    assert len(entries) == 1, entries
-    return unpack_any(entries[0][1][RECORD_FIELD])
+    records = [unpack_any(fields[RECORD_FIELD]) for _, fields in entries]
+    registration = [record for record in records if isinstance(record, CreateAccount)]
+    assert len(registration) == 1, records
+    return registration[0]
 
 
 def _project_to_read_model(settings):
@@ -52,6 +54,25 @@ def _project_to_read_model(settings):
             await redis.aclose()
 
     asyncio.run(_run())
+
+
+def test_gateway_stamps_replay_configuration_at_startup(client: TestClient, settings):
+    r = redis_sync.Redis.from_url(settings.redis_url)
+    try:
+        entries = r.xrange(settings.stream_inbound, "-", "+")
+    finally:
+        r.close()
+
+    assert len(entries) == 1
+    record = unpack_any(entries[0][1][RECORD_FIELD])
+    digest = bytes.fromhex(settings.config_hash)
+    assert isinstance(record, ConfigureReplay)
+    assert record.client_order_id == 0
+    assert record.real_seconds_per_simulated_minute == (
+        settings.replay_real_seconds_per_simulated_minute
+    )
+    assert record.config_hash_hi == int.from_bytes(digest[:8], "big")
+    assert record.config_hash_lo == int.from_bytes(digest[8:16], "big")
 
 
 # --- Criterion 1: a user registers, logs in, and receives virtual capital -------------------

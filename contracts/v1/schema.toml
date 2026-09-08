@@ -1,10 +1,10 @@
-# Quant Arena — event schema, version 1.
+# Quant Arena — event schema, version 2.
 #
 # THIS IS THE SINGLE DEFINITION. The C++ header and the Python module are both generated
 # from this file by `generate.py`. Never hand-edit anything under `generated/`.
 #
-# Status: FROZEN 2026-08-31 — agreed by Dev A and Dev B (Task 1.1 is joint; see WEEKLY_PLAN.md
-# Appendix D.2). Everything from week 1 onward is written against this file.
+# Status: AMENDED 2026-09-08 — replay configuration records added by agreement of Dev A and
+# Dev B. Everything from week 1 onward is written against this file.
 #
 # Changing a record from here is a schema change, not an edit. It needs both developers, a bump
 # of schema_version, and — because Phase 1 has no snapshots (Open Issue 018 section 13.1) —
@@ -13,7 +13,7 @@
 # References: Open Issue 016 (schema and API surface), 002 (integer-only numerics),
 # 004 (record types), 008 (two identifiers), 003 (the Redis stream ID is the sequence number).
 
-schema_version = 1
+schema_version = 2
 
 # ---------------------------------------------------------------------------------------------
 # Conventions — Open Issue 016 sub-decision 16e. Fixed once, so neither developer has to ask.
@@ -159,6 +159,20 @@ fields = [
   { name = "amount_ticks",    type = "i64" },
 ]
 
+[[records]]
+name = "ConfigureReplay"
+record_type = 5
+direction = "inbound"
+doc = """The replay clock and configuration hash, written by the gateway at startup. Forwarded by
+the engine untouched so this configuration has a position in the total order and preserves the
+one-anchor-per-inbound-record recovery invariant."""
+fields = [
+  { name = "client_order_id",                   type = "u64", doc = "Reserved startup idempotency key." },
+  { name = "real_seconds_per_simulated_minute", type = "i64" },
+  { name = "config_hash_hi",                    type = "u64", doc = "First 8 bytes of the SHA-256, big-endian." },
+  { name = "config_hash_lo",                    type = "u64", doc = "Next 8 bytes of the SHA-256, big-endian." },
+]
+
 # ---------------------------------------------------------------------------------------------
 # Outbound records — engine to ledger, fan-out and archiver.
 # ---------------------------------------------------------------------------------------------
@@ -258,4 +272,16 @@ fields = [
   { name = "client_order_id", type = "u64" },
   { name = "user_id",         type = "u64" },
   { name = "amount_ticks",    type = "i64" },
+]
+
+[[records]]
+name = "ReplayConfigured"
+record_type = 17
+direction = "outbound"
+doc = "Forwarded replay configuration, now sequenced."
+fields = [
+  { name = "client_order_id",                   type = "u64" },
+  { name = "real_seconds_per_simulated_minute", type = "i64" },
+  { name = "config_hash_hi",                    type = "u64" },
+  { name = "config_hash_lo",                    type = "u64" },
 ]

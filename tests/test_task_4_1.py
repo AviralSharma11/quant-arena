@@ -9,11 +9,13 @@ from hypothesis import strategies as st
 
 from contracts.v1.generated.contracts import (
     CancelOrder,
+    ConfigureReplay,
     CreateAccount,
     CreditCash,
     Fill,
     OrderAccepted,
     OrderCancelled,
+    ReplayConfigured,
     Side,
     SubmitOrder,
     Tif,
@@ -259,6 +261,28 @@ def test_replaying_a_split_log_rebuilds_identical_cpp_output(cpp_worker):
 
     assert replayed == uninterrupted
     assert replayed_bytes == uninterrupted_bytes
+
+
+def test_cpp_worker_forwards_replay_configuration(cpp_worker):
+    record = ConfigureReplay.new(
+        timestamp_ns=1,
+        client_order_id=0,
+        real_seconds_per_simulated_minute=1,
+        config_hash_hi=11,
+        config_hash_lo=22,
+    )
+
+    actual, _ = run_cpp_worker(cpp_worker, [record])
+
+    assert actual == [
+        ReplayConfigured.new(
+            timestamp_ns=1,
+            client_order_id=0,
+            real_seconds_per_simulated_minute=1,
+            config_hash_hi=11,
+            config_hash_lo=22,
+        )
+    ]
 
 
 @given(order_flows())

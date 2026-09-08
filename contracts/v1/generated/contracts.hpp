@@ -1,7 +1,7 @@
 // GENERATED FILE — DO NOT EDIT.
 //
 // Source:     contracts/v1/schema.toml
-// Source sha: d2b618e33b38860404c7fbda30403a18deb989887a91bd1b13ced9bbea3779fb
+// Source sha: 2a6b0aa5c0e59e8e299ea6ef3265fd9536339ce4a5537b5886658c4b923079e1
 // Regenerate: python contracts/v1/generate.py
 //
 // Hand-editing this file reintroduces exactly the C++/Python drift the generator exists to
@@ -15,7 +15,7 @@
 
 namespace quant_arena::contracts::v1 {
 
-inline constexpr std::uint16_t SCHEMA_VERSION = 1;
+inline constexpr std::uint16_t SCHEMA_VERSION = 2;
 
 // A record's seq is the Redis stream id, which does not exist until XADD returns.
 // Producers write SEQ_UNASSIGNED; consumers fill it in from the message id on read.
@@ -27,6 +27,7 @@ enum class RecordType : std::uint16_t {
   CANCEL_ORDER = 2,  // CancelOrder
   CREATE_ACCOUNT = 3,  // CreateAccount
   CREDIT_CASH = 4,  // CreditCash
+  CONFIGURE_REPLAY = 5,  // ConfigureReplay
   ORDER_ACCEPTED = 10,  // OrderAccepted
   ORDER_REJECTED = 11,  // OrderRejected
   FILL = 12,  // Fill
@@ -34,6 +35,7 @@ enum class RecordType : std::uint16_t {
   BOOK_CHANGED = 14,  // BookChanged
   ACCOUNT_CREATED = 15,  // AccountCreated
   CASH_CREDITED = 16,  // CashCredited
+  REPLAY_CONFIGURED = 17,  // ReplayConfigured
 };
 
 // Order side. Also used for Fill.aggressor_side.
@@ -184,6 +186,33 @@ static_assert(offsetof(CreditCash, timestamp_ns) == 20, "CreditCash.timestamp_ns
 static_assert(offsetof(CreditCash, client_order_id) == 28, "CreditCash.client_order_id moved — regenerate from schema.toml");
 static_assert(offsetof(CreditCash, user_id) == 36, "CreditCash.user_id moved — regenerate from schema.toml");
 static_assert(offsetof(CreditCash, amount_ticks) == 44, "CreditCash.amount_ticks moved — regenerate from schema.toml");
+
+// The replay clock and configuration hash, written by the gateway at startup. Forwarded by the
+// engine untouched so this configuration has a position in the total order and preserves the
+// one-anchor-per-inbound-record recovery invariant.
+// Direction: inbound. record_type = 5.
+struct ConfigureReplay {
+  std::uint16_t schema_version;  // Version of this schema. Consumers accept the current version only.
+  RecordType record_type;  // Discriminator. Fixed offset across every record.
+  std::uint64_t seq_ms;  // Redis stream id, millisecond part. 0 until assigned on read.
+  std::uint64_t seq_ord;  // Redis stream id, ordinal part. 0 until assigned on read.
+  std::int64_t timestamp_ns;  // Gateway-assigned wall clock, nanoseconds.
+  std::uint64_t client_order_id;  // Reserved startup idempotency key.
+  std::int64_t real_seconds_per_simulated_minute;
+  std::uint64_t config_hash_hi;  // First 8 bytes of the SHA-256, big-endian.
+  std::uint64_t config_hash_lo;  // Next 8 bytes of the SHA-256, big-endian.
+};
+static_assert(sizeof(ConfigureReplay) == 60, "ConfigureReplay must be 60 bytes — regenerate from schema.toml");
+static_assert(std::is_trivially_copyable_v<ConfigureReplay>, "ConfigureReplay must be trivially copyable");
+static_assert(offsetof(ConfigureReplay, schema_version) == 0, "ConfigureReplay.schema_version moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, record_type) == 2, "ConfigureReplay.record_type moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, seq_ms) == 4, "ConfigureReplay.seq_ms moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, seq_ord) == 12, "ConfigureReplay.seq_ord moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, timestamp_ns) == 20, "ConfigureReplay.timestamp_ns moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, client_order_id) == 28, "ConfigureReplay.client_order_id moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, real_seconds_per_simulated_minute) == 36, "ConfigureReplay.real_seconds_per_simulated_minute moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, config_hash_hi) == 44, "ConfigureReplay.config_hash_hi moved — regenerate from schema.toml");
+static_assert(offsetof(ConfigureReplay, config_hash_lo) == 52, "ConfigureReplay.config_hash_lo moved — regenerate from schema.toml");
 
 // Order is live in the book. Carries price/qty/side/symbol because there are no snapshots (Open
 // Issue 018 section 13.1): the ledger rebuilds open orders by replaying the OUTBOUND stream
@@ -381,6 +410,31 @@ static_assert(offsetof(CashCredited, timestamp_ns) == 20, "CashCredited.timestam
 static_assert(offsetof(CashCredited, client_order_id) == 28, "CashCredited.client_order_id moved — regenerate from schema.toml");
 static_assert(offsetof(CashCredited, user_id) == 36, "CashCredited.user_id moved — regenerate from schema.toml");
 static_assert(offsetof(CashCredited, amount_ticks) == 44, "CashCredited.amount_ticks moved — regenerate from schema.toml");
+
+// Forwarded replay configuration, now sequenced.
+// Direction: outbound. record_type = 17.
+struct ReplayConfigured {
+  std::uint16_t schema_version;  // Version of this schema. Consumers accept the current version only.
+  RecordType record_type;  // Discriminator. Fixed offset across every record.
+  std::uint64_t seq_ms;  // Redis stream id, millisecond part. 0 until assigned on read.
+  std::uint64_t seq_ord;  // Redis stream id, ordinal part. 0 until assigned on read.
+  std::int64_t timestamp_ns;  // Gateway-assigned wall clock, nanoseconds.
+  std::uint64_t client_order_id;
+  std::int64_t real_seconds_per_simulated_minute;
+  std::uint64_t config_hash_hi;
+  std::uint64_t config_hash_lo;
+};
+static_assert(sizeof(ReplayConfigured) == 60, "ReplayConfigured must be 60 bytes — regenerate from schema.toml");
+static_assert(std::is_trivially_copyable_v<ReplayConfigured>, "ReplayConfigured must be trivially copyable");
+static_assert(offsetof(ReplayConfigured, schema_version) == 0, "ReplayConfigured.schema_version moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, record_type) == 2, "ReplayConfigured.record_type moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, seq_ms) == 4, "ReplayConfigured.seq_ms moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, seq_ord) == 12, "ReplayConfigured.seq_ord moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, timestamp_ns) == 20, "ReplayConfigured.timestamp_ns moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, client_order_id) == 28, "ReplayConfigured.client_order_id moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, real_seconds_per_simulated_minute) == 36, "ReplayConfigured.real_seconds_per_simulated_minute moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, config_hash_hi) == 44, "ReplayConfigured.config_hash_hi moved — regenerate from schema.toml");
+static_assert(offsetof(ReplayConfigured, config_hash_lo) == 52, "ReplayConfigured.config_hash_lo moved — regenerate from schema.toml");
 
 #pragma pack(pop)
 
