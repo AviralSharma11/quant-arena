@@ -219,6 +219,20 @@ def emit_hpp(schema: dict, sha: str) -> str:
         "// struct.calcsize() of the '<'-prefixed format string in contracts.py.",
         "#pragma pack(push, 1)",
         "",
+        "// The common prefix is enough to dispatch a record before its full type is known.",
+        "struct RecordHeader {",
+        "  std::uint16_t schema_version;",
+        "  RecordType record_type;",
+        "};",
+        "static_assert(sizeof(RecordHeader) == 4, "
+        '"RecordHeader must be 4 bytes — regenerate from schema.toml");',
+        "static_assert(std::is_trivially_copyable_v<RecordHeader>, "
+        '"RecordHeader must be trivially copyable");',
+        "static_assert(offsetof(RecordHeader, schema_version) == 0, "
+        '"RecordHeader.schema_version moved — regenerate from schema.toml");',
+        "static_assert(offsetof(RecordHeader, record_type) == 2, "
+        '"RecordHeader.record_type moved — regenerate from schema.toml");',
+        "",
     ]
 
     for record in schema["records"]:
@@ -455,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="fail if the output is stale")
     args = parser.parse_args(argv)
 
-    raw = SCHEMA_PATH.read_bytes()
+    raw = SCHEMA_PATH.read_bytes().replace(b"\r\n", b"\n")
     sha = hashlib.sha256(raw).hexdigest()
     schema = load(SCHEMA_PATH)
     files = render(schema, sha)
@@ -464,7 +478,9 @@ def main(argv: list[str] | None = None) -> int:
         stale = [
             name
             for name, body in files.items()
-            if not (args.out / name).exists() or (args.out / name).read_text() != body
+            if not (args.out / name).exists() or (
+                args.out.joinpath(name).read_text(encoding="utf-8") != body
+            )
         ]
         if stale:
             print("stale: " + ", ".join(sorted(stale)), file=sys.stderr)
@@ -475,7 +491,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     for name, body in files.items():
-        (args.out / name).write_text(body)
+        with (args.out / name).open("w", encoding="utf-8", newline="\n") as output:
+            output.write(body)
     total = sum(
         offsets(schema, layout(schema, r))[1] for r in schema["records"]
     )

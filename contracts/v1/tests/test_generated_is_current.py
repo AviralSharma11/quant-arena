@@ -69,7 +69,7 @@ def test_generated_files_record_the_schema_hash():
     """So a reviewer can tell at a glance which definition a generated file came from."""
     import hashlib
 
-    sha = hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
+    sha = hashlib.sha256(SCHEMA_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     for name in ("contracts.hpp", "contracts.py", "size_check.cpp"):
         assert sha in (GENERATED_DIR / name).read_text(), f"{name} lacks the schema hash"
 

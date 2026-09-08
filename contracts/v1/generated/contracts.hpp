@@ -76,6 +76,16 @@ enum class RejectReason : std::uint16_t {
 // struct.calcsize() of the '<'-prefixed format string in contracts.py.
 #pragma pack(push, 1)
 
+// The common prefix is enough to dispatch a record before its full type is known.
+struct RecordHeader {
+  std::uint16_t schema_version;
+  RecordType record_type;
+};
+static_assert(sizeof(RecordHeader) == 4, "RecordHeader must be 4 bytes — regenerate from schema.toml");
+static_assert(std::is_trivially_copyable_v<RecordHeader>, "RecordHeader must be trivially copyable");
+static_assert(offsetof(RecordHeader, schema_version) == 0, "RecordHeader.schema_version moved — regenerate from schema.toml");
+static_assert(offsetof(RecordHeader, record_type) == 2, "RecordHeader.record_type moved — regenerate from schema.toml");
+
 // A new order. Matched by the engine.
 // Direction: inbound. record_type = 1.
 struct SubmitOrder {
