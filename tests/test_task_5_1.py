@@ -8,9 +8,12 @@ The criteria, and where each is proven:
 1. Ten symbols show distinct, realistically moving prices → `test_settings.py` for the table,
    `test_the_ten_symbols_follow_distinct_price_paths` here for the prices.
 2. The replay ratio appears in configuration and in the stream → the configuration half is
-   `test_the_replay_ratio_is_configured`. **The stream half is not yet implemented**: it needs
-   Amendment 2 and six lines in Dev A's engine (`HANDOFF.md` section 3), and is marked xfail
-   rather than quietly omitted, so it fails loudly the day it lands and stops being a promise.
+   `test_the_replay_ratio_is_configured`; the stream half **landed with Amendment 2** on
+   2026-09-08 and is `test_the_replay_ratio_reaches_the_stream` here for the record shapes,
+   `test_gateway_stamps_replay_configuration_at_startup` in `tests/gateway/test_auth.py` for
+   the gateway actually writing it, and `tests/matcher/` for the engine forwarding it. The
+   `xfail(strict=True)` that stood in for it is gone, having done its job: it failed loudly the
+   day the amendment landed rather than letting a promise go quiet.
 3. The system runs fully offline from pinned data → `test_no_network_is_reachable_from_the_loader`.
 4. The fallback is deterministic with no data file → `test_the_fallback_is_deterministic_...`.
 5. The README states the provenance → `test_the_readme_states_the_data_provenance`.

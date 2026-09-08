@@ -96,11 +96,16 @@ bar_bucket_seconds = [1, 60]
 # Open Issue 005 sub-decision 5g: one real second maps to one simulated minute, so a demo shows
 # a trading day rather than a quiet minute.
 #
-# Stamping it into the *stream* is Task 5.1's second success criterion and is not yet done:
-# `schema.toml` has no record type that can carry a configuration value, so it needs Amendment 2
-# (`ConfigureReplay` / `ReplayConfigured`) and six lines in Dev A's engine. Specified in
-# `HANDOFF.md` section 3, agreed in principle, awaiting Dev A. The value is here and correct;
-# only the stream half is outstanding.
+# Stamped into the *stream* as well, which is Task 5.1's second success criterion. **Done**:
+# Amendment 2 added `ConfigureReplay` (type 5) and `ReplayConfigured` (type 17) and bumped
+# `schema_version` to 2, and the gateway writes one at startup — so it is the first record on
+# every session's inbound stream. The same record carries `config_hash_hi`/`config_hash_lo`,
+# which also closes the 2026-08-31 decision "config hash to the log in 1.4, and to the stream
+# in 2.1" that was never implemented at the time.
+#
+# Changing this value is a truncate-and-restart, like any change to this file, but with a sharper
+# edge: the ratio is now stamped into the retained stream, so a session recorded under one ratio
+# says so for ever. `docker compose down -v`.
 real_seconds_per_simulated_minute = 1
 
 # The pinned dataset, by content. **Which** prices the market replays is a domain parameter every

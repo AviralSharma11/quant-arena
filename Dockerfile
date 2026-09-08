@@ -44,6 +44,16 @@ COPY services/ ./services/
 # dataset is re-fetched.
 COPY data/ ./data/
 
+# The archiver's mount point, owned by the user that will write to it (Task 6.2). Docker seeds a
+# fresh named volume from the image directory it is mounted over, ownership included, so creating
+# it here is what makes the volume writable by `quant`.
+#
+# Without this the archiver runs as a non-root user against a root-owned volume, fails on the
+# first `mkdir`, and — because its healthcheck pings Redis — reports **healthy** while writing
+# nothing. That is the third time this shape of fault has appeared in this project (fan-out not
+# running, the matcher dead but healthy), and it is only ever found by looking at the output.
+RUN mkdir -p /archive && chown quant:quant /archive
+
 USER quant
 EXPOSE 8000
 

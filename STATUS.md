@@ -1,8 +1,11 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-08 · **HEAD** `a63c023` (this session is **uncommitted**) · **Week 6**
-**State:** Week 5 closed. **6.1b built and verified in a browser**; 5.1 blocked on Dev A alone.
-**676 tests pass** against the compose stores, 1 xfailed (5.1 criterion 2, deliberately strict).
+**Last updated:** 2026-09-08 · **HEAD** `ab40487` (branch `task/6.2-archiver`, unpushed) · **Week 6**
+**State:** Week 5 closed. **6.1b merged (PR #18)**. **5.1 is no longer blocked** — Dev A landed
+Amendment 2, so criterion 2's stream half is met and the `xfail` is gone.
+**753 tests pass, 7 skipped, none failing** against the compose stores, with the matcher restarted
+first. No xfails remain. **6.2 is done** — the archiver is a sixth compose service and has been
+run against 6.28 hours of live bot market.
 The nine bot-session errors are **gone** — the cause was two things, a stale `dmm_qaa` password
 *and* a grant that Task 5.1's price scale had left unusable. Both fixed; 43/43 bot tests pass on
 a fresh stack.
@@ -17,29 +20,31 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Commit this session, then Task 6.2 · Archiver** — Dev B, week 6 · **next**
+**Open the 6.2 pull request, then Task 3.3 · deployment half** — Dev B · **next**
 
-- **Nothing is committed.** 6.1b, the grant resize, the bar-width fix and three review fixes are
-  all in the working tree. That is the single next action; the task's own work is finished.
-- **6.1b is built and demonstrated** — order ticket, open orders with cancellation, portfolio,
-  all private-stream driven. Four of 6.1's five criteria verified in a real browser against the
-  live bot market; the fifth by eye. Evidence in Deviations.
+- **6.2 is committed on `task/6.2-archiver` (`ab40487`) and unpushed.** `gh` is not installed on
+  this machine, so opening the PR is yours.
+- **Then 3.3's outstanding half** — HTTPS and a one-command redeploy, carried from week 3.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
+- **`STATUS.md` is over its 250-line cap** and week 5 is closed — the Archive collapse is due.
+- **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
+  `docker compose down -v`.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
 ## Then next
 
-1. **6.2** Archiver (Dev B, wk 6)
-2. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
+1. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
+2. **7.1** Backtester (Dev B, wk 7) — its input is now on disk
 
 ## Blocked / waiting
 
 - **All five round-1 `HANDOFF.md` questions are answered**, and both integration points passed.
-- **On Dev A — one ask, `HANDOFF.md` §3: Amendment 2.** A `ConfigureReplay`/`ReplayConfigured`
-  pair and six lines in `stream_engine.cpp`, agreed in principle, to be done after their current
-  task. Gates **5.1 criterion 2 only**; the other four are independent. 4.2 also unfinished.
-  Amendment 2 has grown a second half: three corrections to `rest_and_ws.md` §2.2, no code change.
+- **Amendment 2 is done** — `ConfigureReplay` (type 5) / `ReplayConfigured` (type 17),
+  `schema_version` 2, verified end to end on a live stack. Its **second half is still unsigned**:
+  three `rest_and_ws.md` §2.2 corrections, documentation only, no code either way.
+- **Ask Dev A to report 4.2, 4.3 and 5.3.** PRs #16 and #17 merged, but a merged PR is not a
+  report and this file does not infer Dev A's status from the repository.
 - **On Dev A — `HANDOFF.md` §3a, reported not asked.** `CppMatcher.run()` has no exception
   handling, so a Redis restart kills the matcher permanently and silently — `tests/gateway/
   test_halt.py` restarts Redis by design, so **every full suite run leaves a dead matcher**.
@@ -79,12 +84,12 @@ serves ten symbols on one `config_hash`.
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
 | 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
-| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | blocked | `a67f1a4` · 20 new tests · 4 of 5 criteria; criterion 2's stream half is Dev A's Amendment 2 |
+| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | done | `a67f1a4`, criterion 2 closed by Dev A's `0faeea7` · **5 of 5 criteria** · `test_the_replay_ratio_reaches_the_stream`, `test_gateway_stamps_replay_configuration_at_startup`; the strict `xfail` is removed, having failed the day the amendment landed |
 | 6.1a Trading screen begins | B | 5 | done | `34b7cb0` · 56 web tests · book, tape, chart, ten live symbol tabs; no criteria of its own, 6.1b carries them |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
-| 6.1b Trading screen completes | B | 6 | done | uncommitted · `tests/web/test_trading_private.py`, 17 tests · 4 of 5 criteria verified in a browser against the live market; see Deviations |
-| 6.2  Archiver | B | 6 | todo | — |
+| 6.1b Trading screen completes | B | 6 | done | `e9bff3f`, merged `1ee2391` · `tests/web/test_trading_private.py`, 17 tests · 4 of 5 criteria verified in a browser against the live market; see Deviations |
+| 6.2  Archiver | B | 6 | done | `ab40487` · 32 archiver tests · **4 of 4 criteria** · live: 702,432 records → 4,666 files over 6.28 h; container restart resumed from `1788885539965-0` |
 | 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
 | 7.1  Backtester | B | 7 | todo | — |
 | 7.2  Backtest screen | B | 7 | todo | — |
@@ -176,6 +181,13 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-08 | The client **resyncs on every connect**, not once per session | `StreamClient` resets its tracker on open, which is an admission that anything missed while disconnected is unrecoverable — so a connect *is* a gap. Found in the browser: signing in after the socket started left cash on "awaiting the grant…" forever | implements OI 014 §14e |
 | 2026-09-08 | The client mirrors the ledger's maker/taker fees, guarded by a test that reads both | The private stream carries no balance — no record can, the engine is money-blind — so cash cannot move on a fill without it. §3.4 puts `role` on the wire for exactly this | one deliberate duplication |
 | 2026-09-08 | `LiveQuote.tsx` deleted | Unused, ran its own frame loop against the one-loop decision, and rendered raw ticks with no tick size — the template a future session would have copied | — |
+| 2026-09-08 | The archiver's checkpoint is a **low-water mark** — the stream id of the oldest record not yet written to a file — not the last record applied | Every file on disk is then complete for everything strictly before it, and nothing after it has been written, so a restart re-derives the in-flight buckets and writes each file exactly once. 6.2's third criterion ("neither a gap nor a duplicate") needs no overwrite semantics and no dedup pass | implements 6.2 criterion 3 |
+| 2026-09-08 | The archiver **imports** `services/fanout/` bars, book and state rather than moving them to a shared package | 6.2's Boundaries say bar aggregation is built once; a move would edit a finished, tested process for cosmetics. Revisit if a third consumer needs them | implements 6.2's Boundaries |
+| 2026-09-08 | Archived 1 Hz L2 snapshots are cut on **`timestamp_ns`**, like bars — the snapshot for stream-second N is written when the first record of N+1 arrives | A wall-clock sampler would put a different number of snapshots in a replay than in the live run, making the archive unreproducible. `timestamp_ns` is real gateway time, so 1 Hz on stream time is the 1 Hz behind the ~345 MB/day estimate | implements OI 011 §11b |
+| 2026-09-08 | A **sealed flush unit is never reopened**; rows arriving for one are counted as `late_rows` and dropped | A backwards-stamped record reopened its old unit and built a second, partial one — which the writer would then write to the same deterministic path, replacing a complete file with an incomplete one. Filing it into whichever unit is open instead would put a trade under the wrong minute, which is a wrong archive nothing would report | found by `test_a_row_for_a_written_unit_is_counted_not_misfiled` |
+| 2026-09-08 | The checkpoint is **exclusive** — the ID before the oldest open unit's first record, not that record | `read_records(last_id=X)` returns records strictly after X, so a checkpoint naming a record still to be re-read skips exactly that record on every restart. One lost trade per restart, in a file nobody would check | `Unit.resume_after` |
+| 2026-09-08 | The image creates `/archive` owned by `quant`, and the archiver's healthcheck asserts **writability**, not just a Redis ping | The container ran non-root against a root-owned volume, failed every `mkdir` and reported healthy while writing nothing. Third instance of healthy-but-idle in this project, after fan-out not running and the matcher dead | `Dockerfile`, `docker-compose.yml` |
+| 2026-09-08 | The archive root is `QA_ARCHIVE_DIR`, a named volume — **infrastructure, not configuration** | A path differs between laptop, CI and container while the configuration is identical; inside `config_hash` it would change the hash when nothing about the configuration had | applies the 2026-08-31 split |
 
 ## Deviations from the plan
 
@@ -196,13 +208,24 @@ a design change.
   sampled. That is `frameLoop.ts` behaving as documented, and it is why the number is missing.
 - **Dev A's C++ uses neither CMake, Catch2 nor nanobind** (all on the closed stack): a bare
   `g++` line, a hand-rolled test, a subprocess instead of a binding. Observed, not judged.
-- **`stream_engine.cpp` hand-codes record sizes and offsets** instead of including the generated
-  `contracts.hpp`. `generate.py --check` cannot see a drift; only 4.1's tests can. `HANDOFF.md` §2.
-- **5.1 Criterion 2 is half met.** The ratio is in configuration, not the stream: `schema.toml`
-  has no record type that can carry a configuration value and the contract is frozen. Needs
-  Amendment 2 and six lines in Dev A's engine (`HANDOFF.md` §3). `xfail(strict=True)`, so the
-  suite goes red the day it lands. **The 31 Aug decision "config hash to the stream in 2.1" was
-  never implemented either**; the same record closes it. Dev A also edited this file in `e8bc8e9`.
+- ~~`stream_engine.cpp` hand-codes record sizes and offsets~~ **Closed by Dev A's `ad65172`**: it
+  now uses the generated layouts, so `generate.py --check` is meaningful for the C++ again.
+- ~~5.1 Criterion 2 is half met~~ **Closed by Dev A's `0faeea7`.** `ConfigureReplay` is the first
+  record on every session's inbound stream and carries the ratio plus
+  `config_hash_hi`/`config_hash_lo` — which also closes the 31 Aug decision "config hash to the
+  stream in 2.1", never implemented at the time. `schema_version` is now 2.
+- **6.2 criterion 4 came in under the estimate, not on it.** 55 MB/day measured over 6.28 h of the
+  live ten-symbol bot market (14.5 MB total); 113 MB/day synthetic. Open Issue 018 §11.1 says
+  ~345 MB/day, but that figure is uncompressed at full ten-level depth, and this writes zstd over a
+  long table while the bot book quotes two or three levels a side. The test band is written around
+  the measurement. Re-measure under 6.3's load generator, where the book is deeper.
+- **Bars occupy more bytes than snapshots while holding a third of the rows** — 1,553 files at a
+  median 3.4 kB, mostly Parquet footer. One file per flush unit per symbol per dataset is the price
+  of the low-water checkpoint; a longer flush unit means fewer, fatter files and a proportionally
+  longer checkpoint lag. One line to change if the file count ever matters.
+- **The `runner.py`/`adapter.py` anchor defect is now live, not dormant.** It was dormant only
+  while no record type produced zero anchors; Amendment 2 created the first candidate. Re-check
+  before 7.3.
 - **Latent defect, found not fixed: `runner.py` documents "every inbound record produces exactly
   one anchor" while `adapter.py` returns `[]` for unknown types.** Recovery counts anchors as its
   bookmark, so the first type producing none makes a restarted matcher re-process an answered
@@ -242,7 +265,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 
 python contracts/v1/generate.py --check          # exit 1 if generated/ is stale
 python scripts/fetch_market_history.py --check   # the pinned prices are the recorded ones
-.venv/bin/python -m pytest -q                    # 676 tests, against the compose stores
+.venv/bin/python -m pytest -q                    # 760 tests, against the compose stores
+docker compose exec archiver sh -c 'du -sh /archive; cat /archive/_checkpoint.json'
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one; a green run carrying
 that skip has not verified 1.1's Criterion 3.

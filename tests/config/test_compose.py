@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SERVICES = ("redis", "postgres", "gateway", "matcher", "ledger", "fanout")
+SERVICES = ("redis", "postgres", "gateway", "matcher", "ledger", "fanout", "archiver")
 
 #: Environment keys the gateway container is allowed to receive. Everything else belongs in
 #: config/quant_arena.toml — see the boundary in Task 1.4.
