@@ -70,8 +70,22 @@ export class MarketBuffer {
   private readonly books = new Map<string, BookView>();
   private readonly tapes = new Map<string, TradeView[]>();
   private readonly lastTrades = new Map<string, TradeView>();
+  /**
+   * Keyed by `symbol:width`, not by symbol.
+   *
+   * A bar channel carries a width — `bars:QAA:1m` and `bars:QAA:1h` are different series of
+   * the same instrument — and the router used to discard it, so both widths would have landed
+   * in one array. The de-duplication in `writeBar` compares only against the *last* element,
+   * so alternating widths would both append and the chart would draw two timeframes as one
+   * line. Harmless while only one width is subscribed, and wrong the moment a second is.
+   */
   private readonly bars = new Map<string, BarView[]>();
   private readonly changed = new Set<string>();
+
+  /** `bars` is keyed by symbol and width; everything else is keyed by symbol alone. */
+  private static barKey(symbol: string, width: string): string {
+    return `${symbol}:${width}`;
+  }
 
   /** Messages written since construction. For the render-conflation test, and for a log line. */
   writes = 0;
@@ -122,7 +136,7 @@ export class MarketBuffer {
    * chart at the same x position, which is the sort of thing that looks like a data bug in the
    * exchange rather than a bug in the client.
    */
-  writeBar(symbol: string, message: BarMessage): void {
+  writeBar(symbol: string, width: string, message: BarMessage): void {
     const bar: BarView = {
       openTicks: message.open_ticks,
       highTicks: message.high_ticks,
@@ -132,10 +146,11 @@ export class MarketBuffer {
       barOpenNs: message.bar_open_ns,
       seq: message.seq,
     };
-    let series = this.bars.get(symbol);
+    const key = MarketBuffer.barKey(symbol, width);
+    let series = this.bars.get(key);
     if (series === undefined) {
       series = [];
-      this.bars.set(symbol, series);
+      this.bars.set(key, series);
     }
     const last = series[series.length - 1];
     if (last !== undefined && last.barOpenNs === bar.barOpenNs) {
@@ -149,8 +164,8 @@ export class MarketBuffer {
   }
 
   /** Oldest first, which is the order a chart library wants. Live, not copied. */
-  barSeries(symbol: string): readonly BarView[] {
-    return this.bars.get(symbol) ?? [];
+  barSeries(symbol: string, width: string): readonly BarView[] {
+    return this.bars.get(MarketBuffer.barKey(symbol, width)) ?? [];
   }
 
   book(symbol: string): BookView | undefined {

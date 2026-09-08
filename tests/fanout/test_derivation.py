@@ -412,12 +412,64 @@ def test_the_bar_message_matches_the_contract():
         "ch", "seq", "open_ticks", "high_ticks", "low_ticks", "close_ticks",
         "volume", "bar_open_ns",
     ]
-    assert msg["ch"] == "bars:QAA:1m"
+    # Sixty real seconds is sixty simulated minutes — one simulated hour. The trading screen's
+    # `1m` candle is the 1-second bucket; see `test_bar_channel_suffixes_are_named_in_simulated_time`.
+    assert msg["ch"] == "bars:QAA:1h"
 
 
-@pytest.mark.parametrize(("seconds", "label"), [(1, "1s"), (60, "1m"), (3_600, "1h"), (7, "7s")])
-def test_bar_channel_suffixes(seconds: int, label: str):
+@pytest.mark.parametrize(
+    ("seconds", "label"),
+    [
+        # At the configured 1 real second : 1 simulated minute, a bucket's width in real
+        # seconds IS its width in simulated minutes.
+        (1, "1m"),        # one simulated minute — the trading screen's chart
+        (60, "1h"),       # one simulated hour — the backtester's coarser series
+        (15, "15m"),
+        (1_440, "1d"),
+        (7, "7m"),        # unmapped: named in simulated minutes rather than refused
+    ],
+)
+def test_bar_channel_suffixes_are_named_in_simulated_time(seconds: int, label: str):
+    """A bar channel is named for the candle the *market* experiences, not for real seconds.
+
+    Buckets are cut on the gateway's real wall clock, and the replay clock maps one real second
+    to one simulated minute — so the one-second bucket is the market's one-minute candle. This
+    is the whole of Task 5.1's answer to what `bars:*:1m` means, and labelling by literal
+    seconds instead is what put the chart on one candle per real minute.
+    """
     assert width_label(seconds) == label
+
+
+def test_a_slower_replay_ratio_renames_the_channels():
+    """The label is derived from the ratio, not from a table that assumes it.
+
+    If a deployment ever replayed at five real seconds to the simulated minute, the 5-second
+    bucket would become the one-minute candle. Nothing else in the system changes; this is the
+    single function that knows.
+    """
+    assert width_label(5, real_seconds_per_simulated_minute=5) == "1m"
+    assert width_label(300, real_seconds_per_simulated_minute=5) == "1h"
+    # Finer than one simulated minute has no simulated name, so it keeps a real-seconds one
+    # rather than collapsing to `0m` and colliding with every other sub-minute width.
+    assert width_label(1, real_seconds_per_simulated_minute=5) == "1s"
+
+
+def test_the_bar_message_and_its_channel_cannot_disagree():
+    """`bar_close` labels the message and the conflation tick labels the channel it goes out
+    on. Two independent labellings of one bar is how a message lands on a channel whose name
+    does not match its own `ch`, so both take the ratio and are checked against each other."""
+    from services.fanout.messages import known_channels
+
+    builder = BarBuilder(symbol_id=1, bucket_seconds=1)
+    builder.add(price_ticks=1_000, qty=4, timestamp_ns=0)
+    bar = builder.flush()
+
+    msg = bar_close(SYMBOL, bar, seq="9-0")
+    assert msg["ch"] == "bars:QAA:1m"
+    # And the subscribable set built from the same widths contains exactly that name, so a
+    # client subscribing to what `known_channels` advertises actually receives this message.
+    assert msg["ch"] in known_channels([SYMBOL], (1, 60))
+    assert "bars:QAA:1h" in known_channels([SYMBOL], (1, 60))
 
 
 def test_no_message_carries_a_float():

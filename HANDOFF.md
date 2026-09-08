@@ -7,10 +7,20 @@ Round 1 asked you five questions and reported one defect. **All five are answere
 is fixed** — the record of that is section 1, kept because the answers are now load-bearing and
 the reasoning should not have to be reconstructed.
 
-This round has exactly one ask, and it is section 3: **Amendment 2 to the frozen contract**, and
-a six-line change in `engine/cpp/stream_engine.cpp` that only you can make. You have agreed to it
-in principle, to be done once your current task is finished. This document is the specification
-so that it is a patch rather than a conversation.
+This round has one ask and one report.
+
+**The ask is section 3: Amendment 2 to the frozen contract**, and a six-line change in
+`engine/cpp/stream_engine.cpp` that only you can make. You have agreed to it in principle, to be
+done once your current task is finished. This document is the specification so that it is a
+patch rather than a conversation. Amendment 2 has grown a second half since we last spoke —
+three corrections to `rest_and_ws.md` §2.2, none of them a code change — because it is the same
+signature and a second freeze-breaking round later costs more than one now.
+
+**The report is section 3a, and it is not an ask.** Reviewing before starting 6.1b I found two
+defects in `services/matcher/cpp_runner.py`, one of which is stopping the matcher dead in the
+running compose stack after every test run. That file is yours (4.2), so I have not touched it —
+but the obvious fix for the first defect activates the second, which is why it is written up
+rather than patched. Take it or hand it back to me; either is fine, but it should not sit.
 
 ---
 
@@ -198,6 +208,128 @@ rebuild"), and it is cheap now and expensive later, which is an argument for doi
 
 **Contracts v1 is frozen, so this needs your signature**, as `resumed` did. Sign it in
 `contracts/v1/schema.toml` and I will land the rest.
+
+### Amendment 2, part two — three corrections to `rest_and_ws.md` §2.2
+
+Folded into the same amendment because it is the same signature and the same conversation, and
+because a second freeze-breaking round later costs more than one now. **None of these is a code
+change.** The implementation is right in all three; §2.2's examples were written in week 1,
+before risk (3.1) and idempotency (3.2) existed, and were never reconciled. What is wrong is the
+document, and a reader coding from it today gets all three wrong. I found them writing 6.1b's
+order ticket.
+
+| | §2.2 says | The gateway has done since week 3–4 | Which is right, and why |
+|---|---|---|---|
+| **a** | request carries `"symbol": "BTC"` — a name | `symbol_id: int`, validated against the registry (`routes_orders.py:54, 201`) | **The code.** §2.3 makes `GET /symbols` the only name↔id mapping, and `schema.toml`'s `SubmitOrder.symbol_id` is an `i16`. A name on the REST edge would have to be resolved to that id anyway, and resolving it in two places is the drift the endpoint exists to prevent |
+| **b** | duplicate of a *completed* request → `200`, `status: "replay"`, outcome verbatim | duplicate-after-accept → `202 accepted`; duplicate-after-reject → `409 rejected`. `replay` is never emitted | **Open.** The code is *usable* — the same key does yield the same answer — but it drops the distinction between a first answer and a replayed one, which is a distinction §2.2 deliberately draws and 6.4's duplicate injection may want to see. Cheapest fix is the document; tell me if you would rather have the status |
+| **c** | `DELETE /orders/{client_order_id}` shows no body | requires a JSON body `{"client_order_id": …}` — the cancel's **own** idempotency key | **The code.** Open Issue 008 requires two identifiers and makes a cancel a request in its own right: one id names the order being cancelled, the other makes the cancel itself idempotent. §2.2 shows only the first, so as written a cancel cannot be retried safely |
+
+Proposed: §2.2's request example becomes `symbol_id`, the `DELETE` line gains its body, and the
+`200 replay` row either goes or gets implemented — your call on that one. **No `schema_version`
+bump for this half**: the binary records are untouched, exactly as with Amendment 1. I will make
+the edit and date it beneath the freeze line once you have signed.
+
+---
+
+## 3a. NOT AN ASK — but it is your file, and it is broken in the running stack
+
+Found while reviewing before 6.1b. I have **not** touched `services/matcher/cpp_runner.py`: 4.2
+is yours, and this is the engine process. Two defects, and the second is the reason I did not
+just send you a one-line patch for the first.
+
+### The matcher dies permanently and silently when Redis restarts
+
+`CppMatcher.run()` has no exception handling at all:
+
+```python
+async def run(self) -> None:
+    while not self._stop.is_set():
+        handled = await self.step()      # nothing catches anything
+        if not handled:
+            await asyncio.sleep(0.01)
+```
+
+Redis goes away → `step()` → `_read()` → `read_records()` raises `ConnectionError` → it escapes
+`run()` → the task ends → `main()` sits on `await asyncio.Event().wait()` forever. Nothing is
+logged, and the container healthcheck only pings Redis, which has come back — so Docker reports
+**healthy** over an exchange that has stopped matching.
+
+`Matcher.run()` in `services/matcher/runner.py` (the Python model runner) catches and retries.
+So do `StreamProducer._run`, `watch_health`, `FanOut.run`, `LedgerConsumer.run` and
+`RiskState.watch_stream` — the last of which carries a long comment about this exact class of
+bug. `CppMatcher` is the one long-running loop in the system without it.
+
+**This is live, not theoretical.** In the compose stack as I found it:
+
+```
+matcher container started   2026-09-07T12:21:09Z   (never restarted)
+redis container started     2026-09-08T06:23:51Z   ← tests/gateway/test_halt.py stops
+                                                      and starts Redis to prove 2.1's
+                                                      criteria 4 and 5
+qa.inbound  head  1788848632612-0   SubmitOrder      user 18, client_order_id 90003
+qa.outbound head  1788848630661-0   OrderAccepted    user 17, client_order_id 90001
+```
+
+The last inbound record went unanswered for over an hour, and `XLEN` on both streams was frozen
+across repeated samples. **Every full `pytest` run leaves the stack in this state**, because the
+halt test restarts Redis by design. It is a large part of why the trading screen has been
+rendering against a static market.
+
+### Do not fix it with the obvious three lines
+
+Adding `try/except` around `step()` turns a stalled exchange into a corrupting one, because of
+the second defect:
+
+```python
+async def step(self) -> int:
+    await self.engine.start()            # ← every cycle
+```
+
+`CppEngineProcess.start()` returns early only if the child is alive. If it has exited, it sets
+`self.process = None` and spawns a **fresh** one — no replay, no recovery. And
+`stream_engine.cpp:381` is `std::uint64_t next_order_id_{1}`, so the new engine has an empty
+book and re-issues `order_id` 1, 2, 3…
+
+Those ids collide with live orders in all three consumers, every one of which is keyed by
+`order_id`: `Ledger.open_orders`, `Book.orders` in fan-out, and `RiskState.open_orders`. Fills
+would be applied to the wrong orders and reservations released against the wrong users. Silent
+money corruption, where today's bug is merely a stopped exchange.
+
+It is unreachable today *only* because `run()` dies before `step()` can loop again. The two
+defects are holding each other down.
+
+### What I think it wants
+
+Both together: `step()` should not call `start()`; `run()` should catch, and on a dead child
+call `await self.recover()` — which already exists and already counts anchors correctly — before
+resuming. That keeps the anchor invariant intact, which matters more after Amendment 2 than
+before it.
+
+**Yours to write, or say the word and I will.** I have left it alone because it is your task and
+because a wrong fix here is worse than the current bug. If you would rather I take it, I will do
+it as specified above and you review.
+
+### One more, and it is cheap
+
+CI never builds the engine, so **all six C++ tests skip on every run** — including the five in
+`tests/matcher/test_cpp_runner.py` that cover the engine actually deployed in compose.
+`ci.yml` already guards against a missing *compiler* (`- name: Assert a C++20 compiler is
+present`) precisely so a skip cannot go quiet; the guard protects `test_sizes.py` and not these.
+Separately, `tests/test_cpp_engine_parity.py:10` hardcodes `order_book_test.exe`, so on the
+`ubuntu-latest` runner it can never run even if the binary were built —
+`tests/matcher/test_cpp_runner.py` checks both names and is the pattern to copy.
+
+I verified both binaries build and pass with a plain `g++` line on macOS in about a second:
+
+```
+g++ -std=c++20 -O2 -Wall -Wextra -o quant-arena-engine engine/cpp/order_book.cpp engine/cpp/stream_engine.cpp
+QA_CPP_ENGINE_PATH=./quant-arena-engine pytest tests/matcher/test_cpp_runner.py    → 5 passed
+g++ -std=c++20 -O2 -Wall -Wextra -o order_book_test engine/cpp/order_book.cpp engine/cpp/order_book_test.cpp
+./order_book_test                                    → "All C++ order book tests passed."
+```
+
+So it is three lines of CI and a one-line path fix, not a project. Both files are yours; say if
+you would rather I did it.
 
 ---
 

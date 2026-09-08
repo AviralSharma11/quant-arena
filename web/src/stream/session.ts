@@ -10,7 +10,7 @@ import { MarketBuffer } from "./buffer.ts";
 import { StreamClient } from "./client.ts";
 import { MockStreamSocket } from "./mock.ts";
 import { channelsFor, type Symbol } from "./symbols.ts";
-import type { ConnectionState } from "./types.ts";
+import type { ConnectionState, PrivateMessage } from "./types.ts";
 
 /**
  * The symbols the session subscribes to are **passed in**, resolved from `GET /symbols`.
@@ -44,6 +44,15 @@ export function startStreamSession(options: {
   symbols: readonly Symbol[];
   onState: (state: ConnectionState) => void;
   onResync?: () => void | Promise<void>;
+  /**
+   * Every private message this session is party to (Task 6.1b).
+   *
+   * `StreamClient` has always accepted this; nothing passed it until there was a portfolio to
+   * drive. The private stream is not a channel a client subscribes to — §3 is explicit that it
+   * is whatever the session owns, so there is deliberately no path from a subscription request
+   * to a user, and nothing is added to `channelsFor` here.
+   */
+  onPrivate?: (message: PrivateMessage) => void;
 }): StreamSession {
   const buffer = new MarketBuffer();
   // Book, tape and bars for every listed symbol. Bars are new in 6.1a — the chart needs them,
@@ -58,6 +67,7 @@ export function startStreamSession(options: {
     buffer,
     onState: options.onState,
     onResync: options.onResync,
+    onPrivate: options.onPrivate,
     socketFactory: USE_MOCK_STREAM
       ? () => {
           mock = new MockStreamSocket({ symbols: names });

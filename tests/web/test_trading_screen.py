@@ -182,10 +182,10 @@ const bar = (open_ns, close) => ({
   ch: "bars:QAA:1m", seq: "1-1", open_ticks: 100, high_ticks: 120,
   low_ticks: 90, close_ticks: close, volume: 5, bar_open_ns: open_ns,
 });
-buffer.writeBar("QAA", bar(1000, 110));
-buffer.writeBar("QAA", bar(2000, 115));
-buffer.writeBar("QAA", bar(2000, 118));   // the same candle, re-delivered
-const series = buffer.barSeries("QAA");
+buffer.writeBar("QAA", "1m", bar(1000, 110));
+buffer.writeBar("QAA", "1m", bar(2000, 115));
+buffer.writeBar("QAA", "1m", bar(2000, 118));   // the same candle, re-delivered
+const series = buffer.barSeries("QAA", "1m");
 console.log(JSON.stringify({
   length: series.length,
   closes: series.map((b) => b.closeTicks),
@@ -202,12 +202,12 @@ def test_the_bar_series_is_bounded():
 import { BAR_LIMIT, MarketBuffer } from "./buffer.ts";
 const buffer = new MarketBuffer();
 for (let i = 0; i < BAR_LIMIT + 250; i += 1) {
-  buffer.writeBar("QAA", {
+  buffer.writeBar("QAA", "1m", {
     ch: "bars:QAA:1m", seq: `1-${i}`, open_ticks: 100, high_ticks: 120,
     low_ticks: 90, close_ticks: 100 + i, volume: 1, bar_open_ns: i * 1_000_000_000,
   });
 }
-const series = buffer.barSeries("QAA");
+const series = buffer.barSeries("QAA", "1m");
 console.log(JSON.stringify({
   limit: BAR_LIMIT,
   length: series.length,
@@ -225,7 +225,7 @@ def test_bars_mark_their_symbol_changed_so_the_frame_loop_paints_them():
     assert run_script("""
 import { MarketBuffer } from "./buffer.ts";
 const buffer = new MarketBuffer();
-buffer.writeBar("QAA", {
+buffer.writeBar("QAA", "1m", {
   ch: "bars:QAA:1m", seq: "1-1", open_ticks: 100, high_ticks: 120,
   low_ticks: 90, close_ticks: 110, volume: 1, bar_open_ns: 1_000_000_000,
 });
@@ -239,7 +239,7 @@ def test_a_burst_of_bars_between_frames_produces_one_paint():
 import { MarketBuffer } from "./buffer.ts";
 const buffer = new MarketBuffer();
 for (let i = 0; i < 200; i += 1) {
-  buffer.writeBar("QAA", {
+  buffer.writeBar("QAA", "1m", {
     ch: "bars:QAA:1m", seq: `1-${i}`, open_ticks: 100, high_ticks: 120,
     low_ticks: 90, close_ticks: 100 + i, volume: 1, bar_open_ns: i * 1_000_000_000,
   });
@@ -301,3 +301,64 @@ def test_still_three_screens():
     """Open Issue 014 §11.1 fixes the count in advance. 6.1a builds one of the three out; it
     does not add a fourth."""
     assert (SRC / "routes.ts").read_text().count("id: \"") == 3
+
+
+def test_two_bar_widths_are_separate_series():
+    """`bars:QAA:1m` and `bars:QAA:1h` are different series of one instrument.
+
+    The router used to discard the width, so both would have landed in one array — and because
+    the de-duplication in `writeBar` compares only against the *last* element, alternating
+    widths would both append and the chart would draw two timeframes as one line. Latent while
+    only one width is subscribed; wrong the moment a second is, which 7.1's backtester will do.
+    """
+    result = run_script("""
+import { MarketBuffer } from "./buffer.ts";
+const buffer = new MarketBuffer();
+const bar = (open_ns, close) => ({
+  seq: "1-1", open_ticks: 100, high_ticks: 120,
+  low_ticks: 90, close_ticks: close, volume: 5, bar_open_ns: open_ns,
+});
+// The same bucket start on two widths — which is exactly what happens on the wire, because
+// both builders cut on the same timestamp.
+buffer.writeBar("QAA", "1m", bar(1000, 110));
+buffer.writeBar("QAA", "1h", bar(1000, 999));
+console.log(JSON.stringify({
+  minute: buffer.barSeries("QAA", "1m").map((b) => b.closeTicks),
+  hour: buffer.barSeries("QAA", "1h").map((b) => b.closeTicks),
+}));
+""")
+    assert result["minute"] == [110], "the hour bar overwrote the minute series"
+    assert result["hour"] == [999]
+
+
+def test_the_client_routes_a_bar_onto_its_own_width():
+    """End to end through `parseChannel`: the width in the channel name is what the buffer is
+    keyed by, so a message on `bars:QAA:1h` must not appear in the `1m` series."""
+    result = run_script("""
+import { MarketBuffer } from "./buffer.ts";
+import { StreamClient } from "./client.ts";
+import { MockStreamSocket } from "./mock.ts";
+
+const buffer = new MarketBuffer();
+let socket = null;
+const client = new StreamClient({
+  url: "/stream",
+  channels: ["bars:QAA:1m", "bars:QAA:1h"],
+  buffer,
+  socketFactory: () => { socket = new MockStreamSocket({ symbols: ["QAA"] }); return socket; },
+});
+client.connect();
+socket.open();
+const bar = (ch, close) => JSON.stringify({
+  ch, seq: "1-1", open_ticks: 100, high_ticks: 120, low_ticks: 90,
+  close_ticks: close, volume: 5, bar_open_ns: 1000,
+});
+socket.onmessage({ data: bar("bars:QAA:1m", 110) });
+socket.onmessage({ data: bar("bars:QAA:1h", 999) });
+console.log(JSON.stringify({
+  minute: buffer.barSeries("QAA", "1m").map((b) => b.closeTicks),
+  hour: buffer.barSeries("QAA", "1h").map((b) => b.closeTicks),
+}));
+""")
+    assert result["minute"] == [110]
+    assert result["hour"] == [999]

@@ -1,10 +1,11 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-07 · **HEAD** `34b7cb0` · **Week 5** (25 Sep – 1 Oct) — running well ahead
-**State:** Weeks 3 and 4 closed. **5.1 at four of five criteria; 6.1a built.** **643 tests pass**
-against the compose stores, 1 xfailed (5.1 criterion 2, deliberately strict). Nine bot-session
-tests error on this machine: `dmm_qaa` exists in the dev database under a forgotten password —
-a data condition, not code, and it stops the bots entirely (`docker compose down -v` clears it).
+**Last updated:** 2026-09-08 · **HEAD** `a63c023` (this session is **uncommitted**) · **Week 6**
+**State:** Week 5 closed. **6.1b built and verified in a browser**; 5.1 blocked on Dev A alone.
+**676 tests pass** against the compose stores, 1 xfailed (5.1 criterion 2, deliberately strict).
+The nine bot-session errors are **gone** — the cause was two things, a stale `dmm_qaa` password
+*and* a grant that Task 5.1's price scale had left unusable. Both fixed; 43/43 bot tests pass on
+a fresh stack.
 **Dev A reported 1.2, 2.3, 2.4, 3.4 and 4.1 done (2026-09-05)**; the stack matches in C++ and
 serves ten symbols on one `config_hash`.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
@@ -16,16 +17,14 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Task 6.1b · Trading screen completes** — Dev B, week 6 · **next**
+**Commit this session, then Task 6.2 · Archiver** — Dev B, week 6 · **next**
 
-- **6.1a is built** (`34b7cb0`): book, tape, chart, symbol tabs, all ten symbols live on one
-  `config_hash`. 6.1b adds the order ticket, open orders with cancellation, and portfolio —
-  private-stream driven, and it carries all five of 6.1's success criteria.
-- **Blocking the demo, not the code:** `docker compose down -v` has not been run. The volumes
-  hold pre-5.1 records at the old price scale, and `dmm_qaa` exists under a forgotten password,
-  which stops **all ten** bots — `runner.sign_in()` fails fast on the first account. Until then
-  the screen renders against a static, mis-scaled market.
-- **5.1 stays `wip`** on criterion 2 alone, which is Dev A's (`HANDOFF.md` §3).
+- **Nothing is committed.** 6.1b, the grant resize, the bar-width fix and three review fixes are
+  all in the working tree. That is the single next action; the task's own work is finished.
+- **6.1b is built and demonstrated** — order ticket, open orders with cancellation, portfolio,
+  all private-stream driven. Four of 6.1's five criteria verified in a real browser against the
+  live bot market; the fifth by eye. Evidence in Deviations.
+- **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
 
 *If NOW is empty or stale, ask. Do not pick a task yourself.*
 
@@ -40,7 +39,14 @@ serves ten symbols on one `config_hash`.
 - **On Dev A — one ask, `HANDOFF.md` §3: Amendment 2.** A `ConfigureReplay`/`ReplayConfigured`
   pair and six lines in `stream_engine.cpp`, agreed in principle, to be done after their current
   task. Gates **5.1 criterion 2 only**; the other four are independent. 4.2 also unfinished.
-- **On a decision from me:** nothing. **External:** the `down -v` in NOW, which is yours to run.
+  Amendment 2 has grown a second half: three corrections to `rest_and_ws.md` §2.2, no code change.
+- **On Dev A — `HANDOFF.md` §3a, reported not asked.** `CppMatcher.run()` has no exception
+  handling, so a Redis restart kills the matcher permanently and silently — `tests/gateway/
+  test_halt.py` restarts Redis by design, so **every full suite run leaves a dead matcher**.
+  Proven: 176 inbound records, 0 outbound, container still "healthy". The obvious three-line fix
+  activates a second defect (`step()` respawns a dead engine with an empty book and `order_id`
+  back to 1, colliding across all three consumers), so it is written up rather than patched.
+- **On a decision from me:** nothing. **External:** nothing outstanding.
 
 ---
 
@@ -73,11 +79,11 @@ serves ten symbols on one `config_hash`.
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
 | 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
-| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | wip | `a67f1a4` · 20 new tests · 4 of 5 criteria; criterion 2's stream half needs Amendment 2 |
+| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | blocked | `a67f1a4` · 20 new tests · 4 of 5 criteria; criterion 2's stream half is Dev A's Amendment 2 |
 | 6.1a Trading screen begins | B | 5 | done | `34b7cb0` · 56 web tests · book, tape, chart, ten live symbol tabs; no criteria of its own, 6.1b carries them |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
-| 6.1b Trading screen completes | B | 6 | todo | — |
+| 6.1b Trading screen completes | B | 6 | done | uncommitted · `tests/web/test_trading_private.py`, 17 tests · 4 of 5 criteria verified in a browser against the live market; see Deviations |
 | 6.2  Archiver | B | 6 | todo | — |
 | 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
 | 7.1  Backtester | B | 7 | todo | — |
@@ -92,23 +98,9 @@ serves ten symbols on one `config_hash`.
 - Dev A rows: `A:todo` · `A:wip` · `A:done` · `A:unknown`, always with `reported YYYY-MM-DD`.
   **Reported by me, never inferred.** Do not read the repo and conclude a Dev A task is finished
   — Dev A may push work in progress, or finish without pushing. `A:unknown` is expected.
-- **Exactly one row may be `wip`**, and it must match NOW.
-
----
-
-## This week — week 5 (25 Sep – 1 Oct)
-
-Success Criteria as a live checklist. Deleted when the week closes.
-
-**5.1 Crypto fair value, replay clock, ten symbols**
-- [x] Ten symbols, distinct prices — normalised shapes prove ten paths, not one offset ten ways
-- [ ] The ratio in configuration **and in the stream** — config yes; the stream half is
-      Amendment 2, `xfail(strict=True)` so it cannot go quiet
-- [x] Runs fully offline from pinned data — the test breaks `socket.socket` and loads anyway
-- [x] The fallback generator is deterministic with no data file present
-- [x] The README states the price paths derive from anonymised historical data
-- [x] Ten symbols served live, every process on one `config_hash` — checked against the gateway
-- [ ] *(not a criterion, but not done)* ten books with **live orders** — needs `down -v`
+- **At most one row may be `wip`**, and it must match NOW. None is `wip` today: 5.1 is `blocked`
+  on Dev A, not in progress. (The old wording said "exactly one", which the file itself broke on
+  2026-09-07 — 5.1 was `wip` while NOW read 6.1b.)
 
 ---
 
@@ -177,6 +169,13 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-06 | Ten symbols carry the **real tick sizes** of the instruments behind them | Four distinct values, not the provisional 1. A table where every tick size was 1 asserts all ten trade on one scale, which is what made the old block provisional | — |
 | 2026-09-06 | A symbol missing from the data file **falls back**; a data file that fails its checksum **raises** | Absent means "you are offline"; wrong means "you are about to generate a session nobody can reproduce" | — |
 | 2026-09-05 | Session lookups use a **blocking** Redis pool | redis-py's default pool *raises* when exhausted: 200 browsers reconnecting at once refused 73 of themselves. A session lookup is one local GET, so queueing is invisible and failing is a dead feed | found by `benchmarks/bench_fanout.py` |
+| 2026-09-08 | **The grant is 10,000,000,000 ticks**, was 1,000,000 | Task 5.1 raised prices to 8,208,718 ticks and left the week-1 grant behind: it could not buy one unit of six of the ten symbols, and every market maker reported `two_sided_uptime: 0.0` with `INSUFFICIENT_CASH` on every bid — one-sided books, the exact failure OI 005 §5e says a DMM prevents. Sized at 12 full quotes of the dataset's peak | resizes the 2026-08-31 grant |
+| 2026-09-08 | A bar channel is named in **simulated** time: the 1-second bucket is `1m`, the 60-second bucket `1h` | `_WIDTH_SUFFIX` labelled by literal seconds, so `bars:*:1m` carried 60-second buckets — one candle per *real* minute, the compression the 2026-09-06 decision was written to prevent. `width_label` now divides by the ratio | implements the 2026-09-06 decision |
+| 2026-09-08 | The idempotency **in-flight sentinel** expires in 30 s; only a recorded outcome keeps the hour | One key served two lifetimes. A gateway dying between claim and record left `in_progress` with no outcome, so every retry got `202 in_progress` for a full hour — an order neither placed nor refused | — |
+| 2026-09-08 | `MarketBuffer` keys bar series by **symbol and width** | The router discarded the width, so two widths would fold into one array and the chart would draw two timeframes as one line. Latent at one width; wrong at two, which 7.1 will need | — |
+| 2026-09-08 | The client **resyncs on every connect**, not once per session | `StreamClient` resets its tracker on open, which is an admission that anything missed while disconnected is unrecoverable — so a connect *is* a gap. Found in the browser: signing in after the socket started left cash on "awaiting the grant…" forever | implements OI 014 §14e |
+| 2026-09-08 | The client mirrors the ledger's maker/taker fees, guarded by a test that reads both | The private stream carries no balance — no record can, the engine is money-blind — so cash cannot move on a fill without it. §3.4 puts `role` on the wire for exactly this | one deliberate duplication |
+| 2026-09-08 | `LiveQuote.tsx` deleted | Unused, ran its own frame loop against the one-loop decision, and rendered raw ticks with no tick size — the template a future session would have copied | — |
 
 ## Deviations from the plan
 
@@ -187,11 +186,14 @@ a design change.
   releases nothing" could not be built reliably against a live matcher. Recorded, not claimed.
 - **3.3 was split.** CI, nightly and multi-arch images merged as `5efe462`; the deployment half
   (HTTPS, one-command redeploy) sits behind week 5. Criteria 2 and 4 pass; 1 and 3 untouched.
-- **Frontend rendering is mechanism-verified, never profiler-verified** — 5.4c's Criterion 5 and
-  6.1a alike. A profiler needs a human at a browser and there is no JS test framework by
-  decision. Proven instead: the buffer cannot notify, the market-data modules cannot reach React,
-  a burst between two frames makes one paint, there is one frame loop, nothing polls REST. That
-  it *looks* right under load is 6.1b's to demonstrate.
+- **6.1 criteria 1, 3, 4 and 5 are browser-verified; criterion 2 is not measured.** On 2026-09-08,
+  against the live bot market: a market buy on QAA filled at 84180.76 as taker and cash moved
+  100,000,000.00 → 99,915,735.06 with position QAA 1, no refresh (notional 8,418,076 + taker fee
+  8,418 = exactly the ticks deducted); a limit bid at 50000.00 rested, appeared in the L2 book,
+  and cancelled cleanly; candles streamed once a second. **Criterion 2 ("no visible frame drops")
+  is confirmed by eye under full bot load and not profiled** — the automated tab reports
+  `visibilityState: "hidden"`, so `requestAnimationFrame` is suspended and zero frames can be
+  sampled. That is `frameLoop.ts` behaving as documented, and it is why the number is missing.
 - **Dev A's C++ uses neither CMake, Catch2 nor nanobind** (all on the closed stack): a bare
   `g++` line, a hand-rolled test, a subprocess instead of a binding. Observed, not judged.
 - **`stream_engine.cpp` hand-codes record sizes and offsets** instead of including the generated
@@ -211,13 +213,26 @@ a design change.
 - **5.2's Criterion 1 was measured on one machine, not a separated topology.** Gateway, fan-out,
   200 sockets and the harness shared ten cores. Median (+4.2%) and encode counts hold; p95 and
   max are pessimistic — re-measure for 7.4.
+- **The bot session tests need a stack the compose bots have not been running on.** They share
+  the same thirty-one accounts, so accumulated inventory and resting orders make five of them
+  fail. 43/43 pass on a fresh stack; `docker compose stop bots` alone is not enough.
+- **`docker compose up --build -d` never rebuilds the bots image**, because the `bots` profile is
+  not active for that command. Caught when the bots came up on a hash matching neither the file
+  nor the other four processes, reporting `"market_makers":2` — the pre-5.1 table. Pass `--build`
+  with the profile, and read the startup hash line.
+- **Two tests were pinned to the old grant and one had stopped testing anything.**
+  `test_reserved_cash_does_not_leak_on_retry` was sized in absolute ticks against 1,000,000, so
+  after the resize its three orders no longer exhausted the account and the assertion that caught
+  a double-reservation passed vacuously. Both now derive from `settings.initial_cash_ticks`.
 
 ## How to run it right now
 
 ```bash
 docker compose up --build -d     # the whole system. Docs at localhost:8000/docs
 docker compose logs gateway | grep config_hash   # every process must print the same one
-QA_BOT_PASSWORD=... docker compose --profile bots up -d   # a live market: makers + noise
+# a live market: makers + noise. --build is required; the password is in secrets-local.txt
+QA_BOT_PASSWORD=... docker compose --profile bots up -d --build
+# stop the bots AND reset the stack before a full suite run — they share accounts with it
 cd web && npm install && npm run dev        # frontend at :5173, proxied to gateway and fan-out
 
 # developing, with reloads:
@@ -227,7 +242,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 
 python contracts/v1/generate.py --check          # exit 1 if generated/ is stale
 python scripts/fetch_market_history.py --check   # the pinned prices are the recorded ones
-.venv/bin/python -m pytest -q                    # 643 tests, against the compose stores
+.venv/bin/python -m pytest -q                    # 676 tests, against the compose stores
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one; a green run carrying
 that skip has not verified 1.1's Criterion 3.

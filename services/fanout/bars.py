@@ -16,12 +16,15 @@ research — is two implementations that will eventually disagree about what a c
 Buckets are cut on `Fill.timestamp_ns`, the timestamp the gateway stamped and every consumer
 replays identically, with the width taken from `market_data.bar_bucket_seconds`.
 
-**This is the thing to revisit at Task 5.1.** The replay clock maps one real second to one
-simulated minute (Open Issue 005 §5g), so "a one-minute bar" is about to become ambiguous: one
-real minute, or one simulated minute — which is one real second. At present rates the first
-holds thousands of fills and the second holds a handful, and 7.1's backtester consumes whichever
-this turns out to mean. The width lives in configuration precisely so 5.1 can answer that by
-changing a line rather than this file.
+**Settled at Task 5.1.** The replay clock maps one real second to one simulated minute (Open
+Issue 005 §5g), and "a one-minute bar" means one *simulated* minute — which is one real second.
+So the widths in configuration are real seconds and the channels they are published under are
+named in simulated time: the 1-second bucket goes out as `bars:*:1m` and the 60-second bucket,
+one simulated hour, as `bars:*:1h`.
+
+Nothing in this file changes with that decision, which is why the width was left in
+configuration in the first place. The translation is one function, `messages.width_label`, and
+it is the only place that knows the ratio.
 """
 
 from __future__ import annotations

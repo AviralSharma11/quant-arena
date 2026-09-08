@@ -71,8 +71,24 @@ export function toTicks(displayPrice: number, symbol: Symbol): number {
   return Math.round(displayPrice * symbol.tick_size_ticks);
 }
 
+/**
+ * The bar width the trading screen charts.
+ *
+ * Named in **simulated** time, like every bar channel: at the replay clock's one real second to
+ * one simulated minute, `1m` is the one-second bucket and is what the market experiences as a
+ * minute. `services/fanout/messages.py` `width_label` is the other half of this agreement, and
+ * `bars:*:1h` is the coarser series the backtester (7.1) will read.
+ *
+ * A constant rather than a literal in two files, because the subscription and the chart that
+ * reads the buffer have to name the same width or the chart silently draws nothing.
+ */
+export const CHART_BAR_WIDTH = "1m";
+
 /** Every channel this client subscribes to, for the whole symbol table (§3.1). */
-export function channelsFor(symbols: readonly Symbol[], barWidth = "1m"): string[] {
+export function channelsFor(
+  symbols: readonly Symbol[],
+  barWidth: string = CHART_BAR_WIDTH,
+): string[] {
   return symbols.flatMap((symbol) => [
     `book:${symbol.name}:l2`,
     `tape:${symbol.name}`,

@@ -13,6 +13,8 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from config.settings import Settings
+
 
 VALID = {"client_order_id": 1, "symbol_id": 1, "side": 1, "tif": 1,
          "price_ticks": 100_000, "qty": 3}
@@ -172,29 +174,36 @@ def test_retry_after_rejection_returns_same_rejection(logged_in: TestClient):
     assert body2["detail"]["reason"] == reason1
 
 
-def test_reserved_cash_does_not_leak_on_retry(logged_in: TestClient):
-    """Task 3.2 Success Criterion 3. Reserved cash for an order should not be double-counted
-    when the client retries a submission. Verify by checking that we can still submit a large
-    order after retrying a valid order."""
-    # First order (should succeed and reserve 300,000 ticks)
-    order1 = {**VALID, "client_order_id": 2003}
-    response1 = logged_in.post("/orders", json=order1)
-    assert response1.status_code == 202
-    
-    # Retry the same order (idempotent, should not double-reserve)
-    response1b = logged_in.post("/orders", json=order1)
-    assert response1b.status_code == 202
-    
-    # Second order with the remaining cash (1M - 300k = 700k)
-    # This should succeed if the retry didn't double-reserve
-    order2 = {**VALID, "client_order_id": 2004, "price_ticks": 100_000, "qty": 4}
-    response2 = logged_in.post("/orders", json=order2)
-    assert response2.status_code == 202, "Should succeed: 400k <= 700k remaining cash"
-    
-    # A third order that would exceed remaining cash should still fail
-    order3 = {**VALID, "client_order_id": 2005, "price_ticks": 100_000, "qty": 4}
+def test_reserved_cash_does_not_leak_on_retry(logged_in: TestClient, settings: Settings):
+    """Task 3.2 Success Criterion 3. A retried submission must not reserve twice.
+
+    Sized as *fractions of the grant* rather than in absolute ticks. It was written against the
+    week-1 figure of 1,000,000 and quietly stopped testing anything when Task 5.1's price scale
+    forced the grant up to ten billion: the three orders no longer came close to exhausting the
+    account, so the third one passed and the assertion that caught a double-reservation was
+    asserting nothing. A test that hard-codes a configured value tests the value, not the
+    behaviour.
+    """
+    tenth = settings.initial_cash_ticks // 10
+
+    # Three tenths of the grant.
+    order1 = {**VALID, "client_order_id": 2003, "price_ticks": tenth, "qty": 3}
+    assert logged_in.post("/orders", json=order1).status_code == 202
+
+    # The same order again. Idempotent, so it must reserve nothing further.
+    assert logged_in.post("/orders", json=order1).status_code == 202
+
+    # Four more tenths. Seven in total, which fits — but only if the retry above reserved
+    # nothing. Had it double-reserved, six tenths would already be committed and this fails.
+    order2 = {**VALID, "client_order_id": 2004, "price_ticks": tenth, "qty": 4}
+    assert logged_in.post("/orders", json=order2).status_code == 202, (
+        "the retry double-reserved: seven tenths of the grant should still fit"
+    )
+
+    # Four more would be eleven tenths. The check must still bite.
+    order3 = {**VALID, "client_order_id": 2005, "price_ticks": tenth, "qty": 4}
     response3 = logged_in.post("/orders", json=order3)
-    assert response3.status_code == 409, "Should fail: 400k + 400k > 700k remaining"
+    assert response3.status_code == 409, "eleven tenths of the grant must not be reservable"
     assert response3.json()["detail"]["reason"] == "INSUFFICIENT_CASH"
 
 

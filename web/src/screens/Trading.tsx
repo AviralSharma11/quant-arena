@@ -29,19 +29,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BookPanel } from "../components/BookPanel";
 import { Chart } from "../components/Chart";
+import { OpenOrders, OrderTicket } from "../components/OrderTicket";
+import { PortfolioPanel } from "../components/PortfolioPanel";
 import { TapePanel } from "../components/TapePanel";
 import type { MarketBuffer } from "../stream/buffer";
 import { startFrameLoop } from "../stream/frameLoop";
+import { openOrderList, type PortfolioState } from "../stream/portfolio";
 import { formatTicks, type Symbol } from "../stream/symbols";
 
 export interface TradingProps {
   buffer: MarketBuffer | null;
   symbols: readonly Symbol[];
+  /** Cash, positions and open orders, folded from the private stream by `App`. */
+  portfolio: PortfolioState;
+  /** The private half is meaningless without a session — there is no private stream to drive
+   *  it, and an empty ticket over a live book would look broken rather than signed out. */
+  signedIn: boolean;
 }
 
 type PaintRegistry = Map<string, Set<() => void>>;
 
-export function Trading({ buffer, symbols }: TradingProps) {
+export function Trading({ buffer, symbols, portfolio, signedIn }: TradingProps) {
   // The selected symbol IS React state — it changes when a human clicks, which is about as
   // low-frequency as an event gets. The prices behind it are not.
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -51,6 +59,12 @@ export function Trading({ buffer, symbols }: TradingProps) {
     () => symbols.find((symbol) => symbol.name === selectedName) ?? symbols[0],
     [symbols, selectedName],
   );
+
+  const symbolsByName = useMemo(
+    () => new Map(symbols.map((symbol) => [symbol.name, symbol])),
+    [symbols],
+  );
+  const openOrders = useMemo(() => openOrderList(portfolio), [portfolio]);
 
   /**
    * A panel's paint callback, keyed by symbol. Returns its own unregister.
@@ -71,6 +85,22 @@ export function Trading({ buffer, symbols }: TradingProps) {
       if (painters!.size === 0) registry.current.delete(symbolName);
     };
   }, []);
+
+  /**
+   * The top of book, read on demand.
+   *
+   * A function rather than a value on purpose: the ticket prefills from the touch when a human
+   * clicks, and passing the price itself would mean this component re-rendering at the book's
+   * rate to keep it current — which is exactly what the frame loop exists to avoid.
+   */
+  const topOfBook = useCallback(() => {
+    if (buffer === null || selected === undefined) return { bid: null, ask: null };
+    const view = buffer.book(selected.name);
+    return {
+      bid: view?.bids[0]?.[0] ?? null,
+      ask: view?.asks[0]?.[0] ?? null,
+    };
+  }, [buffer, selected]);
 
   useEffect(() => {
     if (buffer === null) return;
@@ -116,12 +146,38 @@ export function Trading({ buffer, symbols }: TradingProps) {
         <Chart key={`chart-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
         <BookPanel key={`book-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
         <TapePanel key={`tape-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
-      </div>
 
-      <p className="hint">
-        The order ticket, open orders and portfolio are Task 6.1b. This half is market data only
-        &mdash; every number above is painted outside React state, on the animation frame loop.
-      </p>
+        {/* The private half (6.1b). These three are React state and re-render on a fill; the
+            three above are painted through refs on the frame loop and never re-render at all.
+            Both halves share one screen and one frame loop, and nothing below this line
+            subscribes to the buffer — `topOfBook` reads it once, when a human clicks. */}
+        {signedIn ? (
+          <>
+            <OrderTicket
+              symbol={selected}
+              topOfBook={topOfBook}
+              notices={portfolio.notices}
+              symbolsByName={symbolsByName}
+            />
+            <OpenOrders orders={openOrders} symbolsByName={symbolsByName} />
+            <PortfolioPanel
+              state={portfolio}
+              symbolsByName={symbolsByName}
+              cashSymbol={selected}
+            />
+          </>
+        ) : (
+          <section className="signed-out" aria-label="Sign in to trade">
+            <h3>Trading</h3>
+            <p className="pending">
+              Sign in to trade &mdash; and to see the market at all. `/stream` is authenticated
+              by the session cookie (&sect;3), so the book, tape and chart above stay empty and
+              the indicator reads &ldquo;Reconnecting&rdquo; until there is a session: fan-out
+              accepts the socket, answers <code>unauthenticated</code>, and closes it.
+            </p>
+          </section>
+        )}
+      </div>
     </section>
   );
 }
