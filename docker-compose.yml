@@ -185,6 +185,44 @@ services:
       retries: 12
       start_period: 10s
 
+  archiver:
+    build: .
+    restart: unless-stopped
+    # Outbound stream in, Parquet out (Task 6.2). Its own process for the same reason the matcher,
+    # ledger and fan-out have one (Open Issue 007) — but unlike those three, its absence costs
+    # nothing in Phase 1: the archive is not correctness-critical, because MAXLEN is sized so
+    # replay never needs it (Open Issue 018 section 13.2). Nothing depends on this container, and
+    # it depends on nothing but the log.
+    command: ["python", "-m", "services.archiver"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # No QA_DATABASE_URL: bulk history does not go into PostgreSQL. That is the derived read
+      # model (Open Issue 004), not a data warehouse, and 6.2's Boundaries say so directly.
+      QA_REDIS_URL: redis://redis:6379/0
+      # Infrastructure, not configuration: a path on a machine, so it is deliberately *not* in
+      # the hashed TOML. A path inside config_hash would change the hash when nothing about the
+      # configuration had.
+      QA_ARCHIVE_DIR: /archive
+    volumes:
+      - archive:/archive
+    # No HTTP surface, so liveness is "can still reach the log it consumes" — **and can still write
+    # where it writes**. The second half is not decoration: the first run of this service failed
+    # every `mkdir` against a root-owned volume and reported healthy throughout, because pinging
+    # Redis says nothing about a process whose entire job is producing files. Whether the archive is
+    # *caught up* is still a lag question and still belongs with the benchmarks (Open Issue 012).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,redis,sys; sys.exit(0 if redis.Redis.from_url(os.environ['QA_REDIS_URL']).ping() and os.access(os.environ['QA_ARCHIVE_DIR'], os.W_OK) else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   bots:
     build: .
     restart: unless-stopped
@@ -226,3 +264,6 @@ services:
 volumes:
   pgdata:
   redisdata:
+  # The Parquet archive. A named volume rather than a bind mount: it is derived data that a
+  # `docker compose down -v` is entitled to destroy, and it must not litter the checkout.
+  archive:
