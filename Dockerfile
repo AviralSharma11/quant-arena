@@ -8,7 +8,8 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY engine/cpp/ ./engine/cpp/
-RUN g++ -std=c++20 -O2 -Wall -Wextra -Werror \
+COPY contracts/v1/generated/ ./contracts/v1/generated/
+RUN g++ -std=c++20 -O2 -Wall -Wextra -Werror -I/src \
     -o /quant-arena-engine \
     engine/cpp/order_book.cpp engine/cpp/stream_engine.cpp
 

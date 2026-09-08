@@ -1,5 +1,7 @@
 #include "order_book.hpp"
+#include "contracts/v1/generated/contracts.hpp"
 
+#include <bit>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -24,85 +26,45 @@ using quant_arena::engine::Fill;
 using quant_arena::engine::Order;
 using quant_arena::engine::OrderBook;
 using quant_arena::engine::Side;
+namespace contracts = quant_arena::contracts::v1;
 
-constexpr std::uint16_t kSchemaVersion = 1;
-constexpr std::uint16_t kSubmitOrder = 1;
-constexpr std::uint16_t kCancelOrder = 2;
-constexpr std::uint16_t kCreateAccount = 3;
-constexpr std::uint16_t kCreditCash = 4;
-constexpr std::uint16_t kOrderAccepted = 10;
-constexpr std::uint16_t kOrderRejected = 11;
-constexpr std::uint16_t kFill = 12;
-constexpr std::uint16_t kOrderCancelled = 13;
-constexpr std::uint16_t kAccountCreated = 15;
-constexpr std::uint16_t kCashCredited = 16;
+static_assert(std::endian::native == std::endian::little,
+              "The wire contract requires a little-endian execution target");
 
-constexpr std::uint8_t kBuy = 1;
-constexpr std::uint8_t kSell = 2;
-constexpr std::uint8_t kGtc = 1;
-constexpr std::uint8_t kIoc = 2;
-constexpr std::uint8_t kUserRequested = 1;
-constexpr std::uint8_t kIocExpired = 2;
-constexpr std::uint16_t kInvalidPrice = 2;
-constexpr std::uint16_t kInvalidQuantity = 3;
-constexpr std::uint16_t kInvalidSide = 4;
-constexpr std::uint16_t kInvalidTif = 5;
-constexpr std::uint16_t kUnknownOrder = 8;
-
-std::uint16_t read_u16(const Bytes& data, std::size_t offset) {
-    if (offset + 2 > data.size()) {
-        throw std::runtime_error("record is shorter than its field offset");
+template <typename Record>
+Record unpack_record(const Bytes& data) {
+    if (data.size() != sizeof(Record)) {
+        throw std::runtime_error("record size does not match the generated contract");
     }
-    return static_cast<std::uint16_t>(data[offset]) |
-           (static_cast<std::uint16_t>(data[offset + 1]) << 8);
+    Record record{};
+    std::memcpy(&record, data.data(), sizeof(record));
+    return record;
 }
 
-std::uint64_t read_u64(const Bytes& data, std::size_t offset) {
-    if (offset + 8 > data.size()) {
-        throw std::runtime_error("record is shorter than its field offset");
-    }
-    std::uint64_t value = 0;
-    for (unsigned int index = 0; index < 8; ++index) {
-        value |= static_cast<std::uint64_t>(data[offset + index]) << (index * 8);
-    }
-    return value;
-}
-
-std::int64_t read_i64(const Bytes& data, std::size_t offset) {
-    return static_cast<std::int64_t>(read_u64(data, offset));
-}
-
-std::int16_t read_i16(const Bytes& data, std::size_t offset) {
-    return static_cast<std::int16_t>(read_u16(data, offset));
-}
-
-std::uint8_t read_u8(const Bytes& data, std::size_t offset) {
-    if (offset >= data.size()) {
-        throw std::runtime_error("record is shorter than its field offset");
-    }
-    return data[offset];
-}
-
-void write_u16(Bytes& data, std::size_t offset, std::uint16_t value) {
-    data[offset] = static_cast<Byte>(value & 0xff);
-    data[offset + 1] = static_cast<Byte>((value >> 8) & 0xff);
-}
-
-void write_u64(Bytes& data, std::size_t offset, std::uint64_t value) {
-    for (unsigned int index = 0; index < 8; ++index) {
-        data[offset + index] = static_cast<Byte>((value >> (index * 8)) & 0xff);
-    }
-}
-
-void write_i64(Bytes& data, std::size_t offset, std::int64_t value) {
-    write_u64(data, offset, static_cast<std::uint64_t>(value));
-}
-
-Bytes record_header(std::uint16_t record_type, std::size_t size) {
-    Bytes data(size, 0);
-    write_u16(data, 0, kSchemaVersion);
-    write_u16(data, 2, record_type);
+template <typename Record>
+Bytes pack_record(const Record& record) {
+    Bytes data(sizeof(record));
+    std::memcpy(data.data(), &record, sizeof(record));
     return data;
+}
+
+contracts::RecordHeader unpack_header(const Bytes& data) {
+    if (data.size() < sizeof(contracts::RecordHeader)) {
+        throw std::runtime_error("record is shorter than the generated contract header");
+    }
+    contracts::RecordHeader header{};
+    std::memcpy(&header, data.data(), sizeof(header));
+    return header;
+}
+
+template <typename Record>
+Record new_record(contracts::RecordType record_type) {
+    Record record{};
+    record.schema_version = contracts::SCHEMA_VERSION;
+    record.record_type = record_type;
+    record.seq_ms = contracts::SEQ_UNASSIGNED;
+    record.seq_ord = contracts::SEQ_UNASSIGNED;
+    return record;
 }
 
 std::uint32_t read_frame_length() {
@@ -163,23 +125,23 @@ public:
         : initial_cash_ticks_(initial_cash_ticks) {}
 
     std::vector<Bytes> apply(const Bytes& record) {
-        const auto record_type = read_u16(record, 2);
-        switch (record_type) {
-        case kSubmitOrder:
-            return submit(record);
-        case kCancelOrder:
-            return cancel(record);
-        case kCreateAccount:
-            return create_account(record);
-        case kCreditCash:
-            return credit_cash(record);
+        const auto header = unpack_header(record);
+        switch (header.record_type) {
+        case contracts::RecordType::SUBMIT_ORDER:
+            return submit(unpack_record<contracts::SubmitOrder>(record));
+        case contracts::RecordType::CANCEL_ORDER:
+            return cancel(unpack_record<contracts::CancelOrder>(record));
+        case contracts::RecordType::CREATE_ACCOUNT:
+            return create_account(unpack_record<contracts::CreateAccount>(record));
+        case contracts::RecordType::CREDIT_CASH:
+            return credit_cash(unpack_record<contracts::CreditCash>(record));
         default:
             return {};
         }
     }
 
 private:
-    using ClientKey = std::pair<std::uint64_t, std::uint64_t>;
+   using ClientKey = std::pair<std::uint64_t, std::uint64_t>;
 
     OrderBook& book(std::int16_t symbol_id) {
         return books_[symbol_id];
@@ -189,66 +151,68 @@ private:
         return {user_id, client_order_id};
     }
 
-    Bytes rejected(const Bytes& input, std::uint16_t reason) const {
-        Bytes output = record_header(kOrderRejected, 48);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, read_u64(input, 28));
-        write_u64(output, 36, read_u64(input, 36));
-        write_u16(output, 44, static_cast<std::uint16_t>(read_i16(input, 60)));
-        write_u16(output, 46, reason);
-        return output;
+    Bytes rejected(const contracts::SubmitOrder& input, contracts::RejectReason reason) const {
+        auto output = new_record<contracts::OrderRejected>(contracts::RecordType::ORDER_REJECTED);
+        output.timestamp_ns = input.timestamp_ns;
+        output.client_order_id = input.client_order_id;
+        output.user_id = input.user_id;
+        output.symbol_id = input.symbol_id;
+        output.reason = reason;
+        return pack_record(output);
     }
 
-    Bytes rejected_cancel(const Bytes& input, std::uint16_t reason) const {
-        Bytes output = record_header(kOrderRejected, 48);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, read_u64(input, 28));
-        write_u64(output, 36, read_u64(input, 36));
-        write_u16(output, 44, 0);
-        write_u16(output, 46, reason);
-        return output;
+    Bytes rejected_cancel(const contracts::CancelOrder& input,
+                          contracts::RejectReason reason) const {
+        auto output = new_record<contracts::OrderRejected>(contracts::RecordType::ORDER_REJECTED);
+        output.timestamp_ns = input.timestamp_ns;
+        output.client_order_id = input.client_order_id;
+        output.user_id = input.user_id;
+        output.symbol_id = 0;
+        output.reason = reason;
+        return pack_record(output);
     }
 
-    Bytes accepted(const Bytes& input, std::uint64_t order_id) const {
-        Bytes output = record_header(kOrderAccepted, 72);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, order_id);
-        write_u64(output, 36, read_u64(input, 28));
-        write_u64(output, 44, read_u64(input, 36));
-        write_i64(output, 52, read_i64(input, 44));
-        write_i64(output, 60, read_i64(input, 52));
-        write_u16(output, 68, static_cast<std::uint16_t>(read_i16(input, 60)));
-        output[70] = read_u8(input, 62);
-        output[71] = read_u8(input, 63);
-        return output;
+    Bytes accepted(const contracts::SubmitOrder& input, std::uint64_t order_id) const {
+        auto output = new_record<contracts::OrderAccepted>(contracts::RecordType::ORDER_ACCEPTED);
+        output.timestamp_ns = input.timestamp_ns;
+        output.order_id = order_id;
+        output.client_order_id = input.client_order_id;
+        output.user_id = input.user_id;
+        output.price_ticks = input.price_ticks;
+        output.qty = input.qty;
+        output.symbol_id = input.symbol_id;
+        output.side = input.side;
+        output.tif = input.tif;
+        return pack_record(output);
     }
 
-    Bytes fill_record(const Bytes& input, const Fill& fill, const LiveOrder& maker,
+    Bytes fill_record(const contracts::SubmitOrder& input, const Fill& fill, const LiveOrder& maker,
                       const LiveOrder& taker) const {
-        Bytes output = record_header(kFill, 79);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, maker.order_id);
-        write_u64(output, 36, taker.order_id);
-        write_u64(output, 44, maker.user_id);
-        write_u64(output, 52, taker.user_id);
-        write_i64(output, 60, fill.price);
-        write_i64(output, 68, fill.quantity);
-        write_u16(output, 76, static_cast<std::uint16_t>(maker.symbol_id));
-        output[78] = taker.side;
-        return output;
+        auto output = new_record<contracts::Fill>(contracts::RecordType::FILL);
+        output.timestamp_ns = input.timestamp_ns;
+        output.maker_order_id = maker.order_id;
+        output.taker_order_id = taker.order_id;
+        output.maker_user_id = maker.user_id;
+        output.taker_user_id = taker.user_id;
+        output.price_ticks = fill.price;
+        output.qty = fill.quantity;
+        output.symbol_id = maker.symbol_id;
+        output.aggressor_side = static_cast<contracts::Side>(taker.side);
+        return pack_record(output);
     }
 
-    Bytes cancelled(const Bytes& input, const LiveOrder& order, std::int64_t remaining,
-                    std::uint8_t reason) const {
-        Bytes output = record_header(kOrderCancelled, 63);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, order.order_id);
-        write_u64(output, 36, order.client_order_id);
-        write_u64(output, 44, order.user_id);
-        write_i64(output, 52, remaining);
-        write_u16(output, 60, static_cast<std::uint16_t>(order.symbol_id));
-        output[62] = reason;
-        return output;
+    Bytes cancelled(std::int64_t timestamp_ns, const LiveOrder& order,
+                    std::int64_t remaining, contracts::CancelReason reason) const {
+        auto output =
+            new_record<contracts::OrderCancelled>(contracts::RecordType::ORDER_CANCELLED);
+        output.timestamp_ns = timestamp_ns;
+        output.order_id = order.order_id;
+        output.client_order_id = order.client_order_id;
+        output.user_id = order.user_id;
+        output.remaining_qty = remaining;
+        output.symbol_id = order.symbol_id;
+        output.reason = reason;
+        return pack_record(output);
     }
 
     void forget_if_filled(std::int16_t symbol_id, std::uint64_t order_id) {
@@ -263,30 +227,27 @@ private:
         live_.erase(live);
     }
 
-    std::vector<Bytes> submit(const Bytes& input) {
-        const auto price = read_i64(input, 44);
-        const auto quantity = read_i64(input, 52);
-        const auto side = read_u8(input, 62);
-        const auto tif = read_u8(input, 63);
-        if (price <= 0) {
-            return {rejected(input, kInvalidPrice)};
+    std::vector<Bytes> submit(const contracts::SubmitOrder& input) {
+        if (input.price_ticks <= 0) {
+            return {rejected(input, contracts::RejectReason::INVALID_PRICE)};
         }
-        if (quantity <= 0) {
-            return {rejected(input, kInvalidQuantity)};
+        if (input.qty <= 0) {
+            return {rejected(input, contracts::RejectReason::INVALID_QUANTITY)};
         }
-        if (side != kBuy && side != kSell) {
-            return {rejected(input, kInvalidSide)};
+        if (input.side != contracts::Side::BUY && input.side != contracts::Side::SELL) {
+            return {rejected(input, contracts::RejectReason::INVALID_SIDE)};
         }
-        if (tif != kGtc && tif != kIoc) {
-            return {rejected(input, kInvalidTif)};
+        if (input.tif != contracts::Tif::GTC && input.tif != contracts::Tif::IOC) {
+            return {rejected(input, contracts::RejectReason::INVALID_TIF)};
         }
 
         const auto order_id = next_order_id_++;
-        const auto user_id = read_u64(input, 36);
-        const auto client_order_id = read_u64(input, 28);
-        const auto symbol_id = read_i16(input, 60);
+        const auto user_id = input.user_id;
+        const auto client_order_id = input.client_order_id;
+        const auto symbol_id = input.symbol_id;
         const LiveOrder live{
-            order_id, client_order_id, user_id, symbol_id, side, price,
+            order_id, client_order_id, user_id, symbol_id,
+            static_cast<std::uint8_t>(input.side), input.price_ticks,
         };
         const auto key = client_key(user_id, client_order_id);
         client_to_order_[key] = order_id;
@@ -297,10 +258,10 @@ private:
             static_cast<long long>(order_id),
             static_cast<long long>(user_id),
             std::to_string(symbol_id),
-            side == kBuy ? Side::Buy : Side::Sell,
-            static_cast<long long>(price),
-            static_cast<long long>(quantity),
-            read_i64(input, 20),
+            input.side == contracts::Side::BUY ? Side::Buy : Side::Sell,
+            static_cast<long long>(input.price_ticks),
+            static_cast<long long>(input.qty),
+            input.timestamp_ns,
         });
 
         std::vector<Bytes> output{accepted(input, order_id)};
@@ -319,12 +280,14 @@ private:
         }
 
         const auto current = live_.find(order_id);
-        if (tif == kIoc && current != live_.end()) {
+        if (input.tif == contracts::Tif::IOC && current != live_.end()) {
             const auto order = target_book.get_order(static_cast<long long>(order_id));
             if (order.has_value() && order->remaining_quantity > 0) {
                 const auto remaining = order->remaining_quantity;
                 target_book.cancel_order(static_cast<long long>(order_id));
-                output.push_back(cancelled(input, current->second, remaining, kIocExpired));
+                output.push_back(
+                    cancelled(input.timestamp_ns, current->second, remaining,
+                              contracts::CancelReason::IOC_EXPIRED));
                 client_to_order_.erase(key);
                 live_.erase(current);
             }
@@ -332,12 +295,12 @@ private:
         return output;
     }
 
-    std::vector<Bytes> cancel(const Bytes& input) {
-        const auto user_id = read_u64(input, 36);
-        const auto target_client_order_id = read_u64(input, 44);
+    std::vector<Bytes> cancel(const contracts::CancelOrder& input) {
+        const auto user_id = input.user_id;
+        const auto target_client_order_id = input.target_client_order_id;
         const auto lookup = client_to_order_.find(client_key(user_id, target_client_order_id));
         if (lookup == client_to_order_.end()) {
-            return {rejected_cancel(input, kUnknownOrder)};
+            return {rejected_cancel(input, contracts::RejectReason::UNKNOWN_ORDER)};
         }
 
         const auto live_it = live_.find(lookup->second);
@@ -350,31 +313,32 @@ private:
         if (!current.has_value()) {
             client_to_order_.erase(lookup);
             live_.erase(live_it);
-            return {rejected_cancel(input, kUnknownOrder)};
+            return {rejected_cancel(input, contracts::RejectReason::UNKNOWN_ORDER)};
         }
         const auto remaining = current->remaining_quantity;
         target_book.cancel_order(static_cast<long long>(order.order_id));
         client_to_order_.erase(lookup);
         live_.erase(live_it);
-        return {cancelled(input, order, remaining, kUserRequested)};
+        return {cancelled(input.timestamp_ns, order, remaining,
+                          contracts::CancelReason::USER_REQUESTED)};
     }
 
-    std::vector<Bytes> create_account(const Bytes& input) const {
-        Bytes output = record_header(kAccountCreated, 52);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, read_u64(input, 28));
-        write_u64(output, 36, read_u64(input, 36));
-        write_i64(output, 44, initial_cash_ticks_);
-        return {output};
+    std::vector<Bytes> create_account(const contracts::CreateAccount& input) const {
+        auto output = new_record<contracts::AccountCreated>(contracts::RecordType::ACCOUNT_CREATED);
+        output.timestamp_ns = input.timestamp_ns;
+        output.client_order_id = input.client_order_id;
+        output.user_id = input.user_id;
+        output.initial_cash_ticks = initial_cash_ticks_;
+        return {pack_record(output)};
     }
 
-    std::vector<Bytes> credit_cash(const Bytes& input) const {
-        Bytes output = record_header(kCashCredited, 52);
-        write_i64(output, 20, read_i64(input, 20));
-        write_u64(output, 28, read_u64(input, 28));
-        write_u64(output, 36, read_u64(input, 36));
-        write_i64(output, 44, read_i64(input, 44));
-        return {output};
+    std::vector<Bytes> credit_cash(const contracts::CreditCash& input) const {
+        auto output = new_record<contracts::CashCredited>(contracts::RecordType::CASH_CREDITED);
+        output.timestamp_ns = input.timestamp_ns;
+        output.client_order_id = input.client_order_id;
+        output.user_id = input.user_id;
+        output.amount_ticks = input.amount_ticks;
+        return {pack_record(output)};
     }
 
     std::int64_t initial_cash_ticks_;

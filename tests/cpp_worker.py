@@ -48,6 +48,8 @@ def _compile_command(compiler: str, output: Path) -> list[str] | str:
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-I",
+            str(ROOT),
             "-o",
             str(output),
             *(str(source) for source in ENGINE_SOURCES),
@@ -59,6 +61,7 @@ def _compile_command(compiler: str, output: Path) -> list[str] | str:
     sources = " ".join(f'"{source}"' for source in ENGINE_SOURCES)
     command = (
         f'call "{vcvars}" >nul && cl /nologo /std:c++20 /EHsc /O2 /W4 /WX '
+        f'/I"{ROOT}" '
         f'/Fe:"{output}" {sources}'
     )
     return command
