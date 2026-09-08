@@ -16,7 +16,29 @@
 [exchange]
 # Virtual capital granted to a new account, in int64 ticks. Decided 2026-08-31 during Task 1.3;
 # the plan and the 19 open issues never named a figure.
-initial_cash_ticks = 1_000_000
+#
+# **Resized 2026-09-08, because Task 5.1 changed what a tick is worth.** The provisional symbol
+# table was a pair of ~1,000-tick random walks, against which a 1,000,000 grant was a thousand
+# lots. 5.1 replaced it with ten real instruments whose prices run to 8,208,718 ticks, and the
+# grant was left behind — so it could not buy a single unit of six of the ten symbols, and the
+# designated market makers reported `two_sided_uptime: 0.0` with `INSUFFICIENT_CASH` on every
+# bid. They can only ever sell, because the maker exemption is from the *inventory* check and
+# not the cash one, so those books went one-sided and inventory drifted negative: exactly the
+# failure Open Issue 005 section 5e says a designated market maker exists to prevent.
+#
+# Ten billion is sized off the dataset's peak price rather than chosen round:
+#
+#     peak in the pinned history   8,208,718 ticks (QAA)
+#     one full quote_size=100 quote  820,871,800 ticks
+#     this grant                  12 such quotes, or 1,218 single units
+#
+# Twelve full quotes is the headroom a maker needs to requote continuously while holding
+# inventory, and it leaves a human demo account able to trade every one of the ten symbols.
+#
+# Changing this is a truncate-and-restart, not a hot edit: the amount is stamped onto
+# `AccountCreated` by the matcher as it forwards, so accounts already on the stream keep the
+# grant they were opened with. `docker compose down -v`.
+initial_cash_ticks = 10_000_000_000
 
 [session]
 # Open Issue 015: Redis-backed session cookies, no JWT.
@@ -57,6 +79,17 @@ book_depth = 10
 # (7.1) uses for a coarser series; the 1-second bucket is what the trading screen charts. The
 # aggregation code is unchanged either way — settling this was always a matter of choosing the
 # widths and saying which one the wire's "1m" refers to.
+#
+# **These widths are real seconds; the CHANNEL NAMES they are published under are simulated
+# time.** `services/fanout/messages.py` `width_label` divides by the ratio below, so at 1:1 the
+# widths here appear on the wire as:
+#
+#     1 second  → `bars:<SYMBOL>:1m`     one simulated minute — the trading screen's chart
+#     60 seconds → `bars:<SYMBOL>:1h`    one simulated hour   — the backtester's coarser series
+#
+# Labelling them by literal seconds instead — which is what the code did until this was caught
+# in review — put `1m` on the 60-second bucket, so the chart drew one candle per *real* minute:
+# exactly the compression the paragraph above says must not happen.
 bar_bucket_seconds = [1, 60]
 
 [replay]

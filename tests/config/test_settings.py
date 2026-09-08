@@ -53,7 +53,11 @@ def test_the_hash_is_stable_across_loads():
         ("conflation_hz", 20, "Open Issue 006"),
         ("book_depth", 10, "Open Issue 006"),
         ("replay_real_seconds_per_simulated_minute", 1, "Open Issue 005 sub-decision 5g"),
-        ("initial_cash_ticks", 1_000_000, "decided during Task 1.3"),
+        # Resized 2026-09-08. Task 5.1 replaced a pair of ~1,000-tick random walks with ten real
+        # instruments running to 8,208,718 ticks, and the week-1 grant of 1,000,000 could not buy
+        # one unit of six of them — the designated market makers reported `two_sided_uptime: 0.0`
+        # with `INSUFFICIENT_CASH` on every bid. Sized off the dataset's peak; see the config.
+        ("initial_cash_ticks", 10_000_000_000, "decided during Task 1.3, resized at 5.1"),
     ],
 )
 def test_settled_values_match_their_decisions(attribute: str, expected: int, source: str):

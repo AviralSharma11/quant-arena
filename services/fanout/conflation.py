@@ -75,6 +75,9 @@ class Conflator:
         self.interval = 1.0 / max(1, settings.conflation_hz)
         self.depth = settings.book_depth
         self._symbols: dict[int, Symbol] = {s.symbol_id: s for s in settings.symbols}
+        #: One real second to one simulated minute (Open Issue 005 §5g). Bar channels are named
+        #: in simulated time, so this is what turns a bucket width into a channel suffix.
+        self._replay_ratio = settings.replay_real_seconds_per_simulated_minute
         self._halt_transitions = 0
 
         self.ticks = 0
@@ -180,11 +183,26 @@ class Conflator:
             symbol = self._symbols.get(bar.symbol_id)
             if symbol is None:
                 continue
-            channel = f"bars:{symbol.name}:{messages.width_label(bar.bucket_seconds)}"
+            # One label, used for both the channel and the message's own `ch`. Bar channels are
+            # named in *simulated* time — at the configured ratio the one-second bucket is the
+            # market's one-minute candle — so the ratio travels with the width. See
+            # `messages.width_label`.
+            channel = (
+                f"bars:{symbol.name}:"
+                f"{messages.width_label(bar.bucket_seconds, real_seconds_per_simulated_minute=self._replay_ratio)}"
+            )
             if not self.hub.listeners(channel):
                 continue
             offered += self.hub.broadcast(
-                channel, self.hub.encode(messages.bar_close(symbol, bar, seq=self.state.last_seq))
+                channel,
+                self.hub.encode(
+                    messages.bar_close(
+                        symbol,
+                        bar,
+                        seq=self.state.last_seq,
+                        real_seconds_per_simulated_minute=self._replay_ratio,
+                    )
+                ),
             )
         return offered
 

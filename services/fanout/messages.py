@@ -37,17 +37,52 @@ from services.fanout.book import Book
 
 BUY, SELL = int(Side.BUY), int(Side.SELL)
 
-#: Seconds to the suffix the contract uses in a channel name. Bar widths are configuration, so
-#: an unmapped width falls back to `<n>s` rather than failing — a new width should appear on the
+#: Simulated minutes to the suffix the contract uses in a channel name.
+#:
+#: **A bar channel is named in SIMULATED time, never in real seconds.** Buckets are cut on
+#: `Fill.timestamp_ns`, which is the gateway's real wall clock, and the replay clock maps one
+#: real second to one simulated minute (Open Issue 005 §5g, `[replay]` in the configuration). So
+#: the one-second bucket *is* the market's one-minute candle and goes out as `1m`, and the
+#: sixty-second bucket is one simulated hour and goes out as `1h`.
+#:
+#: This is what `bars:*:1m` means on the browser wire, and it is the question the configuration
+#: parked for Task 5.1. Labelling by literal seconds instead put the chart on one candle per
+#: *real* minute — sixty simulated minutes of price action compressed into a single candle,
+#: which is precisely the failure the decision was written to prevent.
+#:
+#: An unmapped width falls back to `<n>m` rather than failing: a new width should appear on the
 #: wire under an obvious name, not stop the process.
-_WIDTH_SUFFIX = {1: "1s", 60: "1m", 300: "5m", 3600: "1h"}
+_SIMULATED_MINUTES_SUFFIX = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1_440: "1d"}
+
+#: The configured ratio, as a default so that every caller without a `Settings` in hand still
+#: agrees with the ones that have one. It is the value in `[replay]` and has never been anything
+#: else; a deployment that changed it must pass it, and the two call sites that matter do.
+DEFAULT_REAL_SECONDS_PER_SIMULATED_MINUTE = 1
 
 
-def width_label(bucket_seconds: int) -> str:
-    return _WIDTH_SUFFIX.get(bucket_seconds, f"{bucket_seconds}s")
+def width_label(
+    bucket_seconds: int, *, real_seconds_per_simulated_minute: int = DEFAULT_REAL_SECONDS_PER_SIMULATED_MINUTE
+) -> str:
+    """The channel suffix for a bucket width, in simulated time.
+
+    `bucket_seconds` is real seconds of stream time — that is what `BarBuilder` cuts on — and
+    the label is what the market experiences. At the configured 1:1 ratio a 1-second bucket is
+    one simulated minute (`1m`) and a 60-second bucket is one simulated hour (`1h`).
+    """
+    ratio = max(1, real_seconds_per_simulated_minute)
+    minutes = bucket_seconds // ratio
+    if minutes < 1:
+        # Finer than one simulated minute. Named in real seconds because there is no smaller
+        # simulated unit to name it in, and a `0m` channel would collide for every such width.
+        return f"{bucket_seconds}s"
+    return _SIMULATED_MINUTES_SUFFIX.get(minutes, f"{minutes}m")
 
 
-def known_channels(symbols, bar_widths) -> set[str]:
+def known_channels(
+    symbols,
+    bar_widths,
+    real_seconds_per_simulated_minute: int = DEFAULT_REAL_SECONDS_PER_SIMULATED_MINUTE,
+) -> set[str]:
     """Every channel name a client may subscribe to.
 
     Built from the configuration rather than pattern-matched, so `unknown_channel` (§3.6) is
@@ -63,7 +98,10 @@ def known_channels(symbols, bar_widths) -> set[str]:
         channels.add(f"book:{symbol.name}:l2")
         channels.add(f"tape:{symbol.name}")
         for width in bar_widths:
-            channels.add(f"bars:{symbol.name}:{width_label(width)}")
+            channels.add(
+                f"bars:{symbol.name}:"
+                f"{width_label(width, real_seconds_per_simulated_minute=real_seconds_per_simulated_minute)}"
+            )
     return channels
 
 
@@ -146,10 +184,25 @@ def tape_print(symbol: Symbol, trade: Trade) -> dict:
     }
 
 
-def bar_close(symbol: Symbol, bar: Bar, *, seq: str) -> dict:
-    """A completed candle, published on close."""
+def bar_close(
+    symbol: Symbol,
+    bar: Bar,
+    *,
+    seq: str,
+    real_seconds_per_simulated_minute: int = DEFAULT_REAL_SECONDS_PER_SIMULATED_MINUTE,
+) -> dict:
+    """A completed candle, published on close.
+
+    The ratio is threaded in rather than read from a module-level constant so that this and the
+    channel the conflation tick broadcasts on are computed the same way from the same value —
+    two independent labellings of one bar is exactly how a message ends up on a channel whose
+    name does not match its own `ch` field.
+    """
     return {
-        "ch": f"bars:{symbol.name}:{width_label(bar.bucket_seconds)}",
+        "ch": (
+            f"bars:{symbol.name}:"
+            f"{width_label(bar.bucket_seconds, real_seconds_per_simulated_minute=real_seconds_per_simulated_minute)}"
+        ),
         "seq": seq,
         "open_ticks": bar.open_ticks,
         "high_ticks": bar.high_ticks,

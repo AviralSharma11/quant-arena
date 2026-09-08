@@ -106,7 +106,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.startup_record = log_startup("fanout", settings)
         app.state.sessions = SessionStore(redis, settings.session_ttl_seconds)
         app.state.channels = messages.known_channels(
-            settings.symbols, settings.bar_bucket_seconds
+            settings.symbols,
+            settings.bar_bucket_seconds,
+            settings.replay_real_seconds_per_simulated_minute,
         )
 
         hub = Hub()
