@@ -1,12 +1,11 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-08 · **HEAD** `1ee2391` · **Week 6**
+**Last updated:** 2026-09-08 · **HEAD** `ab40487` (branch `task/6.2-archiver`, unpushed) · **Week 6**
 **State:** Week 5 closed. **6.1b merged (PR #18)**. **5.1 is no longer blocked** — Dev A landed
 Amendment 2, so criterion 2's stream half is met and the `xfail` is gone.
-**715 tests pass, 1 fails** (`tests/gateway/test_halt.py`) against the compose stores — the
-failure is Dev A's `cpp_runner.py` defect, not a regression. No xfails remain.
-**Three files are uncommitted**: `HANDOFF.md`, `config/quant_arena.toml`, `tests/test_task_5_1.py`
-— the documentation of Amendment 2 landing. Committing them is the first action.
+**753 tests pass, 7 skipped, none failing** against the compose stores, with the matcher restarted
+first. No xfails remain. **6.2 is done** — the archiver is a sixth compose service and has been
+run against 6.28 hours of live bot market.
 The nine bot-session errors are **gone** — the cause was two things, a stale `dmm_qaa` password
 *and* a grant that Task 5.1's price scale had left unusable. Both fixed; 43/43 bot tests pass on
 a fresh stack.
@@ -21,16 +20,13 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Task 6.2 · Archiver** — Dev B, week 6 · **next**
+**Open the 6.2 pull request, then Task 3.3 · deployment half** — Dev B · **next**
 
-- **First, commit the three Amendment-2 documentation files.** They are the only thing in the
-  working tree; 6.1b and everything before it is merged.
-- **Then 6.2.** Read: outbound stream in, Parquet out — trades, 1s/60s bars, 1 Hz L2 snapshots,
-  partitioned by symbol and day, with a resumable offset. Bar aggregation is **imported** from
-  `services/fanout/` (bars.py, book.py, state.py), not rewritten — the Boundaries say build it
-  once, and reconciling bars against the archived *trades* is what makes criterion 2 mean
-  something.
+- **6.2 is committed on `task/6.2-archiver` (`ab40487`) and unpushed.** `gh` is not installed on
+  this machine, so opening the PR is yours.
+- **Then 3.3's outstanding half** — HTTPS and a one-command redeploy, carried from week 3.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
+- **`STATUS.md` is over its 250-line cap** and week 5 is closed — the Archive collapse is due.
 - **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
   `docker compose down -v`.
 
@@ -38,8 +34,8 @@ serves ten symbols on one `config_hash`.
 
 ## Then next
 
-1. **6.2** Archiver (Dev B, wk 6)
-2. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
+1. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
+2. **7.1** Backtester (Dev B, wk 7) — its input is now on disk
 
 ## Blocked / waiting
 
@@ -93,7 +89,7 @@ serves ten symbols on one `config_hash`.
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
 | 6.1b Trading screen completes | B | 6 | done | `e9bff3f`, merged `1ee2391` · `tests/web/test_trading_private.py`, 17 tests · 4 of 5 criteria verified in a browser against the live market; see Deviations |
-| 6.2  Archiver | B | 6 | wip | NOW · task read; design settled (see Decisions) |
+| 6.2  Archiver | B | 6 | done | `ab40487` · 32 archiver tests · **4 of 4 criteria** · live: 702,432 records → 4,666 files over 6.28 h; container restart resumed from `1788885539965-0` |
 | 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
 | 7.1  Backtester | B | 7 | todo | — |
 | 7.2  Backtest screen | B | 7 | todo | — |
@@ -188,6 +184,10 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-08 | The archiver's checkpoint is a **low-water mark** — the stream id of the oldest record not yet written to a file — not the last record applied | Every file on disk is then complete for everything strictly before it, and nothing after it has been written, so a restart re-derives the in-flight buckets and writes each file exactly once. 6.2's third criterion ("neither a gap nor a duplicate") needs no overwrite semantics and no dedup pass | implements 6.2 criterion 3 |
 | 2026-09-08 | The archiver **imports** `services/fanout/` bars, book and state rather than moving them to a shared package | 6.2's Boundaries say bar aggregation is built once; a move would edit a finished, tested process for cosmetics. Revisit if a third consumer needs them | implements 6.2's Boundaries |
 | 2026-09-08 | Archived 1 Hz L2 snapshots are cut on **`timestamp_ns`**, like bars — the snapshot for stream-second N is written when the first record of N+1 arrives | A wall-clock sampler would put a different number of snapshots in a replay than in the live run, making the archive unreproducible. `timestamp_ns` is real gateway time, so 1 Hz on stream time is the 1 Hz behind the ~345 MB/day estimate | implements OI 011 §11b |
+| 2026-09-08 | A **sealed flush unit is never reopened**; rows arriving for one are counted as `late_rows` and dropped | A backwards-stamped record reopened its old unit and built a second, partial one — which the writer would then write to the same deterministic path, replacing a complete file with an incomplete one. Filing it into whichever unit is open instead would put a trade under the wrong minute, which is a wrong archive nothing would report | found by `test_a_row_for_a_written_unit_is_counted_not_misfiled` |
+| 2026-09-08 | The checkpoint is **exclusive** — the ID before the oldest open unit's first record, not that record | `read_records(last_id=X)` returns records strictly after X, so a checkpoint naming a record still to be re-read skips exactly that record on every restart. One lost trade per restart, in a file nobody would check | `Unit.resume_after` |
+| 2026-09-08 | The image creates `/archive` owned by `quant`, and the archiver's healthcheck asserts **writability**, not just a Redis ping | The container ran non-root against a root-owned volume, failed every `mkdir` and reported healthy while writing nothing. Third instance of healthy-but-idle in this project, after fan-out not running and the matcher dead | `Dockerfile`, `docker-compose.yml` |
+| 2026-09-08 | The archive root is `QA_ARCHIVE_DIR`, a named volume — **infrastructure, not configuration** | A path differs between laptop, CI and container while the configuration is identical; inside `config_hash` it would change the hash when nothing about the configuration had | applies the 2026-08-31 split |
 
 ## Deviations from the plan
 
@@ -214,6 +214,15 @@ a design change.
   record on every session's inbound stream and carries the ratio plus
   `config_hash_hi`/`config_hash_lo` — which also closes the 31 Aug decision "config hash to the
   stream in 2.1", never implemented at the time. `schema_version` is now 2.
+- **6.2 criterion 4 came in under the estimate, not on it.** 55 MB/day measured over 6.28 h of the
+  live ten-symbol bot market (14.5 MB total); 113 MB/day synthetic. Open Issue 018 §11.1 says
+  ~345 MB/day, but that figure is uncompressed at full ten-level depth, and this writes zstd over a
+  long table while the bot book quotes two or three levels a side. The test band is written around
+  the measurement. Re-measure under 6.3's load generator, where the book is deeper.
+- **Bars occupy more bytes than snapshots while holding a third of the rows** — 1,553 files at a
+  median 3.4 kB, mostly Parquet footer. One file per flush unit per symbol per dataset is the price
+  of the low-water checkpoint; a longer flush unit means fewer, fatter files and a proportionally
+  longer checkpoint lag. One line to change if the file count ever matters.
 - **The `runner.py`/`adapter.py` anchor defect is now live, not dormant.** It was dormant only
   while no record type produced zero anchors; Amendment 2 created the first candidate. Re-check
   before 7.3.
@@ -256,7 +265,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 
 python contracts/v1/generate.py --check          # exit 1 if generated/ is stale
 python scripts/fetch_market_history.py --check   # the pinned prices are the recorded ones
-.venv/bin/python -m pytest -q                    # 716 tests, against the compose stores
+.venv/bin/python -m pytest -q                    # 760 tests, against the compose stores
+docker compose exec archiver sh -c 'du -sh /archive; cat /archive/_checkpoint.json'
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one; a green run carrying
 that skip has not verified 1.1's Criterion 3.
