@@ -213,12 +213,15 @@ export class StreamClient {
       this.options.buffer.writeBook(channel.symbol, message as BookMessage);
     } else if (channel.kind === "tape") {
       this.options.buffer.writeTrade(channel.symbol, message as TapeMessage);
-    } else if (channel.kind === "bars" && channel.symbol !== null) {
+    } else if (channel.kind === "bars" && channel.tier !== null) {
       // Task 6.1's chart. Routed here rather than into React state for the same reason the
       // book is: it arrives on the socket and is painted on the frame loop.
-      this.options.buffer.writeBar(channel.symbol, message as BarMessage);
+      //
+      // The width (`channel.tier`) travels with it. `bars:QAA:1m` and `bars:QAA:1h` are
+      // different series of one instrument, and folding them into a single array would draw
+      // two timeframes as one line.
+      this.options.buffer.writeBar(channel.symbol, channel.tier, message as BarMessage);
     }
-    // `bars` are consumed by the chart in Task 6.1 and are not buffered here yet.
   }
 
   /**

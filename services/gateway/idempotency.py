@@ -23,12 +23,32 @@ from redis.asyncio import Redis
 #: Redis key format for idempotency state. Prefix + user_id + client_order_id.
 IDEMPOTENCY_PREFIX = "qa.idempotent:"
 
+#: How long the `in_progress` sentinel survives before Redis reclaims the key.
+#:
+#: One key, two very different lifetimes: *a request is in flight* is milliseconds, and *this
+#: answer is replayable* is `idempotency.ttl_seconds`, an hour. Writing the sentinel at the hour
+#: gave the first the lifetime of the second, and the failure that exposes it is a gateway that
+#: dies between the claim and `record_accepted`/`record_rejected`. The key then survives with no
+#: outcome attached, so every retry reads the sentinel, gets `claimed=False`, and is answered
+#: `202 in_progress` — for a full hour. A client doing exactly what the contract tells it to
+#: ("await the private stream, then retry") never gets an answer, and the order is neither
+#: placed nor refused.
+#:
+#: Thirty seconds is far longer than the claim-to-record window, which is one `XADD` and a
+#: couple of in-memory checks, and short enough that a crash costs a client one retry rather
+#: than an hour. `record_accepted` and `record_rejected` both re-`SET` with the full TTL, so a
+#: request that completes normally is unaffected by this value.
+IN_FLIGHT_TTL_SECONDS = 30
+
 # Lua script for atomic claim:
 # Check if the idempotency key exists, and if not, set it to "in_progress" atomically.
 # This ensures that only one submission can claim the key at a time.
 #
 # KEYS[1] = idempotency key
-# ARGV[1] = TTL in seconds
+# ARGV[1] = in-flight TTL in seconds — NOT the replay TTL. See IN_FLIGHT_TTL_SECONDS: the
+#           sentinel only has to outlive the claim-to-record window, and a crash inside that
+#           window must not lock the client_order_id for the full replay hour. The outcome is
+#           written with the long TTL by record_accepted / record_rejected.
 #
 # Returns:
 # - [1, outcome_json] if the key already exists — a duplicate, whether the original finished
@@ -86,9 +106,19 @@ class IdempotencyStore:
     This ensures the following invariant: if the key is claimed, an order was appended.
     """
 
-    def __init__(self, redis: Redis, ttl_seconds: int):
+    def __init__(
+        self,
+        redis: Redis,
+        ttl_seconds: int,
+        *,
+        in_flight_ttl_seconds: int = IN_FLIGHT_TTL_SECONDS,
+    ):
         self.redis = redis
+        #: How long a recorded *outcome* stays replayable. Open Issue 008's hour.
         self.ttl_seconds = ttl_seconds
+        #: How long an unfinished *claim* survives. Never longer than the outcome TTL — a
+        #: sentinel that outlived the answer it is standing in for would be nonsense.
+        self.in_flight_ttl_seconds = min(in_flight_ttl_seconds, ttl_seconds)
         self._claim_script = redis.register_script(CLAIM_SCRIPT)
 
     def _key(self, user_id: int, client_order_id: int) -> str:
@@ -109,7 +139,9 @@ class IdempotencyStore:
         key = self._key(user_id, client_order_id)
 
         # Execute the atomic claim script
-        result = await self._claim_script(keys=[key], args=[self.ttl_seconds])
+        # The short TTL: this writes only the sentinel. The outcome that replaces it carries
+        # the full replay TTL, so a completed request is unaffected.
+        result = await self._claim_script(keys=[key], args=[self.in_flight_ttl_seconds])
 
         if result[0] == 1:
             # Duplicate: key already exists, return stored outcome

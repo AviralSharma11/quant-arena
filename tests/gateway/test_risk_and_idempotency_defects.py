@@ -335,3 +335,72 @@ def test_the_band_is_configuration_not_a_constant(settings: Settings):
     # A market sell floors at best_bid x (1 - band).
     assert state.banded_market_price(symbol_id=4, side=SELL, band_bps=500) == 950
     assert state.banded_market_price(symbol_id=4, side=SELL, band_bps=1_000) == 900
+
+
+# --- the idempotency key's two lifetimes ---------------------------------------------------------
+
+
+@pytest.fixture
+def idempotency_store(settings: Settings):
+    """An `IdempotencyStore` on the test Redis, driven directly.
+
+    Directly rather than through the app, because what is under test is the TTL Redis actually
+    holds on the key — which no HTTP response reveals.
+    """
+    from redis.asyncio import Redis
+
+    from services.gateway.idempotency import IdempotencyStore
+
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    yield IdempotencyStore(redis, settings.idempotency_ttl_seconds)
+
+
+@pytest.mark.anyio
+async def test_an_abandoned_claim_expires_in_seconds_not_an_hour(idempotency_store):
+    """A gateway that dies between the claim and the record must not lock the key for an hour.
+
+    One Redis key served two very different lifetimes: "a request is in flight" (milliseconds)
+    and "this answer is replayable" (Open Issue 008's hour). Writing the sentinel at the hour
+    meant a crash inside the claim-to-record window left the key holding `in_progress` with no
+    outcome — so every retry read the sentinel, got `claimed=False`, and was answered
+    `202 in_progress` for the full hour. A client following the contract exactly ("await the
+    private stream, then retry") never gets an answer and the order is neither placed nor
+    refused.
+    """
+    store = idempotency_store
+    key = store._key(7, 4242)
+
+    claimed = await store.claim(7, 4242)
+    assert claimed.claimed is True
+
+    ttl = await store.redis.ttl(key)
+    assert 0 < ttl <= store.in_flight_ttl_seconds, (
+        f"the in-flight sentinel is holding a {ttl}s TTL; it must expire in seconds so an "
+        f"abandoned claim costs the client one retry rather than an hour"
+    )
+    assert store.in_flight_ttl_seconds < store.ttl_seconds, (
+        "the sentinel must be shorter-lived than the outcome it stands in for"
+    )
+    await store.redis.aclose()
+
+
+@pytest.mark.anyio
+async def test_a_recorded_outcome_still_keeps_the_full_replay_ttl(idempotency_store):
+    """The short TTL is for the *claim* only. Once an answer exists it must stay replayable for
+    the window Open Issue 008 specifies, or a legitimate retry would be processed twice."""
+    store = idempotency_store
+    key = store._key(8, 5150)
+
+    await store.claim(8, 5150)
+    await store.record_accepted(8, 5150, None, "1693526400000-4")
+
+    ttl = await store.redis.ttl(key)
+    assert ttl > store.in_flight_ttl_seconds
+    assert ttl <= store.ttl_seconds
+
+    # And it replays as the same answer, which is the whole point of keeping it.
+    outcome = await store.claim(8, 5150)
+    assert outcome.status == "accepted"
+    assert outcome.seq == "1693526400000-4"
+    assert outcome.claimed is False
+    await store.redis.aclose()

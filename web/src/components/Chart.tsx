@@ -23,7 +23,7 @@ import { CandlestickSeries, createChart, type IChartApi, type ISeriesApi } from 
 import { useEffect, useRef } from "react";
 
 import type { MarketBuffer } from "../stream/buffer";
-import type { Symbol } from "../stream/symbols";
+import { CHART_BAR_WIDTH, type Symbol } from "../stream/symbols";
 
 export interface ChartProps {
   symbol: Symbol;
@@ -69,7 +69,9 @@ export function Chart({ symbol, buffer, register }: ChartProps) {
     series.current = candles;
 
     const paint = () => {
-      const bars = buffer.barSeries(symbol.name);
+      // The same width the session subscribes to. The buffer keys bar series by symbol *and*
+      // width, so asking for a width nobody subscribed to correctly returns nothing.
+      const bars = buffer.barSeries(symbol.name, CHART_BAR_WIDTH);
       if (bars.length === 0) return;
       candles.setData(
         bars.map((bar) => ({
