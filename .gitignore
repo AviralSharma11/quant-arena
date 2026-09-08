@@ -24,3 +24,8 @@ node_modules/
 # in the repository the first time someone forgets to set it". Keeping the file untracked is what
 # makes that true while still leaving the value somewhere findable on this machine.
 secrets-local.txt
+
+# Claude Code local permission rules. Personal to this machine — the allow/ask/deny lists name
+# local commands and this checkout, and they are not a team-wide agreement. Project-wide rules
+# would go in .claude/settings.json, which IS committed.
+.claude/settings.local.json

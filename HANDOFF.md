@@ -7,20 +7,31 @@ Round 1 asked you five questions and reported one defect. **All five are answere
 is fixed** — the record of that is section 1, kept because the answers are now load-bearing and
 the reasoning should not have to be reconstructed.
 
-This round has one ask and one report.
+**Update 2026-09-08, after your PRs #16 and #17 — the ask is closed. One thing is still open.**
 
-**The ask is section 3: Amendment 2 to the frozen contract**, and a six-line change in
-`engine/cpp/stream_engine.cpp` that only you can make. You have agreed to it in principle, to be
-done once your current task is finished. This document is the specification so that it is a
-patch rather than a conversation. Amendment 2 has grown a second half since we last spoke —
-three corrections to `rest_and_ws.md` §2.2, none of them a code change — because it is the same
-signature and a second freeze-breaking round later costs more than one now.
+| | Was | Now |
+|---|---|---|
+| §2 — drive `stream_engine.cpp` from the generated header | asked | **done**, `ad65172` |
+| §3 — Amendment 2 (`ConfigureReplay` / `ReplayConfigured`) | asked | **done**, `0faeea7` |
+| §3a — two defects in `cpp_runner.py` | reported | **still open, and now the only red test** |
 
-**The report is section 3a, and it is not an ask.** Reviewing before starting 6.1b I found two
-defects in `services/matcher/cpp_runner.py`, one of which is stopping the matcher dead in the
-running compose stack after every test run. That file is yours (4.2), so I have not touched it —
-but the obvious fix for the first defect activates the second, which is why it is written up
-rather than patched. Take it or hand it back to me; either is fine, but it should not sit.
+Thank you for taking §3 whole rather than only the six lines — the gateway write, both engines,
+`is_anchor` and the tests all landed together, and the runtime `schema_version` check closes the
+gap I flagged as unenforced. I have verified it end to end on a live stack: `ConfigureReplay` is
+the first record on the inbound stream carrying `ratio=1` and the configuration hash, and
+`ReplayConfigured` is the first on outbound. **Task 5.1's second success criterion is met**, and
+the same record closes the 2026-08-31 decision "config hash to the stream in 2.1" that had never
+been implemented. `schema_version` is 2, so a `docker compose down -v` is required once — I have
+done it here.
+
+Amendment 2's second half — the three `rest_and_ws.md` §2.2 corrections below — is still
+unsigned. It is documentation only; no code changes either way.
+
+**§3a is now blocking the suite, not just the demo.** Detail below, but the new fact is that it
+cascades: `test_halt.py` kills the matcher, and every bot test in the *same and subsequent* runs
+then fails against a dead exchange. Measured today — 3 bot failures with the matcher dead,
+41 passed the moment it was restarted, nothing else changed. That file is yours (4.2) so I have
+still not touched it. Say the word and I will take it; otherwise it needs you.
 
 ---
 
@@ -74,19 +85,21 @@ Three observations, recorded rather than raised as objections — 2.4, 3.4 and 4
   `order_book_test.cpp` with its own `check()`, and a subprocess/stdin-stdout boundary instead of
   a binding. The subprocess boundary may well be the better call — it keeps the engine genuinely
   zero-I/O and money-blind — but it is undocumented, and it lands on me at 7.3 and 7.5.
-- **`stream_engine.cpp` hand-codes the wire format.** `contracts/v1/generated/contracts.hpp` is
-  generated from `schema.toml` for exactly this purpose, and `stream_engine.cpp` includes only
-  `order_book.hpp`, re-typing every offset and record size as a literal (`record_header(kFill,
-  79)` and so on). They are correct today and 4.1's differential tests would catch a drift — but
-  `generate.py --check` would report everything up to date while the C++ read the wrong bytes.
-  **Please drive it from the generated header.** This matters more after section 3 than before it.
+- ~~**`stream_engine.cpp` hand-codes the wire format.**~~ **Closed by `ad65172`** — it now uses
+  the generated layouts, with the include path threaded through the Dockerfile. That was the
+  right order to do it in: hand-coded constants plus a `schema_version` bump would have been
+  wrong-and-unnoticed, which is exactly what section 3 warned about.
 - **`e8bc8e9` edited `STATUS.md`**, including replacing a row in the decision log, which is
   append-only. No harm done and the content was right; flagging it so the log's history is not
   quietly wrong. That file is Dev B's — send me the change and I will land it.
 
 ---
 
-## 3. THE ASK — Amendment 2, and six lines in your engine
+## 3. CLOSED 2026-09-08 by `0faeea7` — Amendment 2, and six lines in your engine
+
+*Kept below as the record of what was agreed and why, because the reasoning is now load-bearing
+for recovery and should not have to be reconstructed. The specification is what you built; the
+only part still unsigned is "part two" at the end, which is documentation.*
 
 ### Why a new record type at all
 
@@ -231,7 +244,7 @@ the edit and date it beneath the freeze line once you have signed.
 
 ---
 
-## 3a. NOT AN ASK — but it is your file, and it is broken in the running stack
+## 3a. STILL OPEN after #16/#17 — your file, and now the only failing test
 
 Found while reviewing before 6.1b. I have **not** touched `services/matcher/cpp_runner.py`: 4.2
 is yours, and this is the engine process. Two defects, and the second is the reason I did not
@@ -259,7 +272,21 @@ So do `StreamProducer._run`, `watch_health`, `FanOut.run`, `LedgerConsumer.run` 
 `RiskState.watch_stream` — the last of which carries a long comment about this exact class of
 bug. `CppMatcher` is the one long-running loop in the system without it.
 
-**This is live, not theoretical.** In the compose stack as I found it:
+**It cascades, which is the part that changed.** `tests/gateway/test_halt.py` stops and starts
+Redis to prove 2.1's criteria 4 and 5. That kills the matcher, and it stays dead — so every bot
+test afterwards runs against an exchange that is not matching. Measured on 2026-09-08 against
+`1ee2391`:
+
+```
+full suite            → 1 failed (test_halt), 715 passed
+next run, same stack  → 3 more failures, all in tests/bots
+docker compose restart matcher
+tests/bots again      → 41 passed, 2 skipped     ← nothing else changed
+```
+
+So a green run is only reachable by restarting the matcher by hand between runs.
+
+**And it is live, not theoretical.** In the compose stack as I first found it:
 
 ```
 matcher container started   2026-09-07T12:21:09Z   (never restarted)
