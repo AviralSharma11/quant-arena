@@ -25,6 +25,25 @@ them, and any restart begins above every id the previous run could have reached.
 
 Zero is reserved: `POST /auth/register` uses it for the account's own `CreateAccount`.
 
+## A session expires; the bot re-authenticates and retries once
+
+`session.ttl_seconds` is **absolute, not sliding**: `SessionStore.create` sets the Redis key
+with `ex=ttl` and `SessionStore.user_id` reads it without renewing. So a bot calling the API
+every second still loses its session on the twelfth hour, exactly as one sitting idle would.
+
+Left unhandled that is invisible. The containers stay healthy — the gateway is fine, it is
+answering — the bots log `no two-sided quote` forever, and the market simply stops. It was
+found nine hours after the fact, with `POST /orders` returning 401 in an unbroken wall.
+
+So every request goes through `_request`, which on a 401 logs in again and **re-sends the same
+request once**. The retry is safe because a 401 is raised by the `CurrentUser` dependency,
+which resolves *before* the rate limiter and before `idempotency.claim` — so nothing was
+recorded against that `client_order_id` and the resend cannot become a second order. It is the
+Open Issue 008 retry protocol arriving through a different door: same decision, same key.
+
+Exactly one retry. A re-login that fails, or a second 401, returns the refusal and lets the
+caller treat it as one.
+
 ## Feedback is REST polling, until Task 5.2b
 
 There is no private stream yet, so a bot learns its own fills by reading `GET /portfolio` and
@@ -38,12 +57,17 @@ method rather than every caller.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import time
 from dataclasses import dataclass, field
 
 import httpx
 
 from contracts.v1.generated.contracts import Side, Tif
+
+LOGGER_NAME = "quant_arena.bots"
+
 
 def new_client_order_id_base() -> int:
     """Where a fresh bot process starts counting. See the module docstring.
@@ -122,9 +146,10 @@ class BotClient:
         for attempt in range(attempts):
             registered = await self.http.post("/auth/register", json=credentials)
             if registered.status_code in (201, 409):
-                login = await self.http.post("/auth/login", json=credentials)
+                # Not through `_request`. A 401 here is the wrong-password case, which must
+                # raise below rather than be retried behind another login attempt.
+                login = await self._login()
                 if login.status_code == 200:
-                    self.user_id = login.json()["user_id"]
                     return
                 if login.status_code == 401:
                     raise RuntimeError(
@@ -138,6 +163,60 @@ class BotClient:
             f"{self.username} could not sign in after {attempts} attempts "
             f"(last register: {registered.status_code})"
         )
+
+    async def _login(self) -> httpx.Response:
+        """`POST /auth/login` and nothing else. Returns the response for the caller to read.
+
+        Deliberately not `sign_in()`: that one registers first, and its 401 branch raises a
+        `RuntimeError` blaming a stale `QA_BOT_PASSWORD` — a diagnosis that is right at
+        start-up and wrong on a session that merely aged out.
+
+        It also deliberately does **not** call `cancel_all_resting()`. The session expired; the
+        orders on the book did not, and neither did this process's view of its own quotes.
+        Cancelling here would pull a live two-sided market for no reason.
+
+        httpx replaces the `qa_session` cookie in its jar by name, so the dead one is gone by
+        construction rather than by us clearing it.
+        """
+        response = await self.http.post(
+            "/auth/login", json={"username": self.username, "password": self.password}
+        )
+        if response.status_code == 200:
+            self.user_id = response.json()["user_id"]
+        return response
+
+    async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """Every authenticated call goes through here. On a 401, log in again and resend once.
+
+        `kwargs` carries the body unchanged, which is the point: a resent `POST /orders` holds
+        the same `client_order_id` it was built with, so it is a retry of one decision and not
+        a second order. See the module docstring for why nothing was recorded against that key.
+
+        One retry, never a loop. A failed re-login or a second 401 returns the refusal, and the
+        caller turns it into a rejected `OrderOutcome` exactly as it would any other.
+        """
+        response = await self.http.request(method, url, **kwargs)
+        if response.status_code != 401:
+            return response
+
+        login = await self._login()
+        if login.status_code != 200:
+            return response
+
+        # Logged, not silent. This project has now had four faults whose whole signature was a
+        # healthy container doing nothing, and a self-heal nobody can see is the next one.
+        logging.getLogger(LOGGER_NAME).warning(
+            json.dumps(
+                {
+                    "event": "session_reauth",
+                    "username": self.username,
+                    "method": method,
+                    "path": url,
+                },
+                separators=(",", ":"),
+            )
+        )
+        return await self.http.request(method, url, **kwargs)
 
     async def await_funding(self, *, attempts: int = 60, delay: float = 0.5) -> int:
         """Block until the cash grant has been projected into the read model.
@@ -158,7 +237,7 @@ class BotClient:
 
     async def refresh(self) -> None:
         """Re-read cash and positions. Replaced by the private stream at Task 5.2b."""
-        response = await self.http.get("/portfolio")
+        response = await self._request("GET", "/portfolio")
         if response.status_code != 200:
             return
         body = response.json()
@@ -169,7 +248,7 @@ class BotClient:
         return self.positions.get(symbol_id, 0)
 
     async def open_orders(self) -> list[dict]:
-        response = await self.http.get("/orders/open")
+        response = await self._request("GET", "/orders/open")
         return response.json() if response.status_code == 200 else []
 
     async def cancel_all_resting(self) -> int:
@@ -252,7 +331,7 @@ class BotClient:
         the case a market maker hits when it requotes through a lost response.
         """
         client_order_id = self.take_client_order_id()
-        response = await self.http.request(
+        response = await self._request(
             "DELETE",
             f"/orders/{target_client_order_id}",
             json={"client_order_id": client_order_id},
@@ -260,7 +339,7 @@ class BotClient:
         return self._outcome(response, client_order_id)
 
     async def _submit(self, body: dict) -> OrderOutcome:
-        response = await self.http.post("/orders", json=body)
+        response = await self._request("POST", "/orders", json=body)
         return self._outcome(response, body["client_order_id"])
 
     @staticmethod
