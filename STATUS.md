@@ -1,11 +1,14 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-08 · **HEAD** `ab40487` (branch `task/6.2-archiver`, unpushed) · **Week 6**
-**State:** Week 5 closed. **6.1b merged (PR #18)**. **5.1 is no longer blocked** — Dev A landed
-Amendment 2, so criterion 2's stream half is met and the `xfail` is gone.
-**753 tests pass, 7 skipped, none failing** against the compose stores, with the matcher restarted
-first. No xfails remain. **6.2 is done** — the archiver is a sixth compose service and has been
-run against 6.28 hours of live bot market.
+**Last updated:** 2026-09-09 · **HEAD** `396a8d2` (branch `fix/bot-session-reauth`, unpushed;
+`main` is `7721be6`) · **Week 6**
+**State:** Week 5 closed. **6.2 merged (PR #19)** — week 6's Dev B tasks are both done.
+**765 pass, 7 skipped, none failing** against the compose stores, with the matcher restarted
+first. No xfails remain.
+**3.3 is on hold by your decision (2026-09-09)**, before the deployment target was chosen.
+**The bots stopped trading after twelve hours and nothing noticed** — sessions expire on an
+absolute TTL and `BotClient` logged in once, so `POST /orders` returned 401 for nine hours
+behind a `(healthy)` gateway. Fixed in `396a8d2`.
 The nine bot-session errors are **gone** — the cause was two things, a stale `dmm_qaa` password
 *and* a grant that Task 5.1's price scale had left unusable. Both fixed; 43/43 bot tests pass on
 a fresh stack.
@@ -20,13 +23,18 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Open the 6.2 pull request, then Task 3.3 · deployment half** — Dev B · **next**
+**Open the PR for `fix/bot-session-reauth`, then restart the bots on it** — Dev B · **next**
 
-- **6.2 is committed on `task/6.2-archiver` (`ab40487`) and unpushed.** `gh` is not installed on
-  this machine, so opening the PR is yours.
-- **Then 3.3's outstanding half** — HTTPS and a one-command redeploy, carried from week 3.
+- **`396a8d2` is committed and unpushed.** `gh` is not installed here, so the PR is yours.
+- **The live market is down and will stay down until you start it.** The bots image is already
+  built, so nothing is left in the command but the secret:
+  `QA_BOT_PASSWORD=... docker compose --profile bots up -d --build`
+  Then confirm `{"event":"session_reauth",...}` appears in `docker compose logs bots` at the
+  twelve-hour mark with trading continuing past it.
+- **3.3 is on hold**, so the next scheduled task is **7.1 Backtester**. Ask before starting it.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
-- **`STATUS.md` is over its 250-line cap** and week 5 is closed — the Archive collapse is due.
+- **`STATUS.md` is 288 lines against a 250 cap** and this diff adds to it. The overflow is in
+  Decisions and Deviations, both append-only, so trimming needs your call on what goes.
 - **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
   `docker compose down -v`.
 
@@ -34,8 +42,9 @@ serves ten symbols on one `config_hash`.
 
 ## Then next
 
-1. **3.3** Deployment half — HTTPS and a one-command redeploy (Dev B, carried from wk 3)
-2. **7.1** Backtester (Dev B, wk 7) — its input is now on disk
+1. **7.1** Backtester (Dev B, wk 7) — its input is now on disk
+2. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
+   terminator, neither of which is mine to choose. See Blocked.
 
 ## Blocked / waiting
 
@@ -52,6 +61,12 @@ serves ten symbols on one `config_hash`.
   activates a second defect (`step()` respawns a dead engine with an empty book and `order_id`
   back to 1, colliding across all three consumers), so it is written up rather than patched.
 - **On a decision from me:** nothing. **External:** nothing outstanding.
+- **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
+  for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
+  Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
+- **On you, to restart the live market:** `secrets-local.txt` is `deny`-listed in
+  `.claude/settings.local.json` and the denial is enforced above that file, so I cannot read
+  `QA_BOT_PASSWORD` by any route. Every step around it is done; the one command is in NOW.
 
 ---
 
@@ -77,7 +92,7 @@ serves ten symbols on one `config_hash`.
 | 3.2  Idempotency — atomic claim-and-append | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 6 of 6 criteria · concurrent burst now yields exactly one order · **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | **half merged** `5efe462` — CI gate, nightly, multi-arch images. Criteria 1 and 3 (HTTPS, one-command redeploy) outstanding; see Deviations |
 | 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:done | reported 2026-09-05 · `2930cb2` · 4 tests, 2 Hypothesis properties at 100 examples |
-| 4.4  Bots — market maker and noise traders | B | 4 | done | `68c7821` · 43 tests · live: 130 fills in 45s, both makers meeting their uptime obligation, units conserved at 0 per symbol |
+| 4.4  Bots — market maker and noise traders | B | 4 | done | `68c7821` · live: 130 fills in 45s, both makers meeting their uptime obligation, units conserved at 0 per symbol · session re-auth `396a8d2`, 55 bot tests |
 | 5.2a Fan-out process begins | B | 4 | done | `0eb5329` · 38 tests · derived book matches the matcher order-for-order across a 400-record sequence; live 706 records recovered |
 | 5.4c WS client, gap detection, rAF loop | B | 4 | done | `78ed4dc` · 26 tests · reconnect re-subscribes, a deliberate private gap triggers exactly one resync; criterion 5 mechanism-verified, profiler check manual |
 | 4.2  Engine process, Redis, replay recovery | A | 5 | A:todo | reported unfinished 2026-09-05 · `b644130` merged and live in compose |
@@ -188,6 +203,9 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-08 | The checkpoint is **exclusive** — the ID before the oldest open unit's first record, not that record | `read_records(last_id=X)` returns records strictly after X, so a checkpoint naming a record still to be re-read skips exactly that record on every restart. One lost trade per restart, in a file nobody would check | `Unit.resume_after` |
 | 2026-09-08 | The image creates `/archive` owned by `quant`, and the archiver's healthcheck asserts **writability**, not just a Redis ping | The container ran non-root against a root-owned volume, failed every `mkdir` and reported healthy while writing nothing. Third instance of healthy-but-idle in this project, after fan-out not running and the matcher dead | `Dockerfile`, `docker-compose.yml` |
 | 2026-09-08 | The archive root is `QA_ARCHIVE_DIR`, a named volume — **infrastructure, not configuration** | A path differs between laptop, CI and container while the configuration is identical; inside `config_hash` it would change the hash when nothing about the configuration had | applies the 2026-08-31 split |
+| 2026-09-09 | A bot meeting a **401 logs in again and re-sends the same request once** | Sessions expire on an absolute TTL, so a bot quoting every second still dies at hour twelve. The resend is a retry and not a duplicate because a 401 comes from the `CurrentUser` dependency, which resolves *before* the rate limiter and before `idempotency.claim` — nothing was recorded against that `client_order_id` | implements OI 008's retry protocol at a new door |
+| 2026-09-09 | **The gateway session TTL stays absolute** — renewal on use was rejected | Renewing on read is the other possible fix, and it is a change to auth semantics settled in OI 015: a browser session that never expires while a tab is open is a different decision from a bot that reconnects. The client is the layer that knows it is a bot | declines to amend OI 015 |
+| 2026-09-09 | Re-login is **login-only**, and does not cancel resting orders | `sign_in()` registers first and its 401 branch raises about a stale `QA_BOT_PASSWORD` — the right diagnosis at start-up, the wrong one for a session that aged out. And the session expired; the orders on the book did not, so cancelling would pull a live two-sided market for nothing | — |
 
 ## Deviations from the plan
 
@@ -247,6 +265,14 @@ a design change.
   `test_reserved_cash_does_not_leak_on_retry` was sized in absolute ticks against 1,000,000, so
   after the resize its three orders no longer exhausted the account and the assertion that caught
   a double-reservation passed vacuously. Both now derive from `settings.initial_cash_ticks`.
+- **Fourth healthy-but-idle fault**, after fan-out not running, the matcher dead-but-healthy, and
+  the archiver failing every `mkdir`. The gateway was genuinely fine — it was answering 401
+  correctly — so no healthcheck could have caught this one. It was found only by comparing
+  `XLEN qa.inbound` twice five seconds apart. The pattern is now four for four: **the container
+  is not the thing to check; the output is.**
+- **3.3 is on hold at your instruction (2026-09-09)**, not deferred again for schedule reasons.
+  The half that is merged still passes criteria 2 and 4; 1 and 3 are untouched and now blocked
+  on decisions listed above.
 
 ## How to run it right now
 
@@ -265,7 +291,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # first
 
 python contracts/v1/generate.py --check          # exit 1 if generated/ is stale
 python scripts/fetch_market_history.py --check   # the pinned prices are the recorded ones
-.venv/bin/python -m pytest -q                    # 760 tests, against the compose stores
+.venv/bin/python -m pytest -q                    # 772 collected: 765 pass, 7 skip
 docker compose exec archiver sh -c 'du -sh /archive; cat /archive/_checkpoint.json'
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one; a green run carrying
