@@ -1,16 +1,18 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-09 · **HEAD** `fbf81ce` (branch `task/7.1-backtester`, unpushed;
-`main` is `7721be6`) · **Week 7**
+**Last updated:** 2026-09-09 · **HEAD** `3941931` (branch `task/7.2-backtest-screen`, unpushed;
+`main` is `e1bd874`) · **Week 7**
 **State:** Week 5 closed. **6.2 merged (PR #19)** — week 6's Dev B tasks are both done.
-**7.1 is done — 5 of 5 criteria.** The backtester runs, and on QAA it reports the strategy
-losing 0.72% against the market's 0.87%, with fees alone costing 0.82% of the account.
-**796 pass, 7 skipped, none failing** on `task/7.1-backtester`, with the matcher restarted
-first. No xfails remain. **Two branches are unpushed and both edit this file** — see NOW.
+**7.1 and 7.2 are done.** The backtester runs and the third screen exists, so **all three
+screens are built**. On QAA the strategy loses 0.72% against the market's 0.87%, with fees
+alone costing 0.82% of the account — the comparison earning its place.
+**835 pass, 7 skipped, none failing**, with the matcher restarted first. No xfails remain.
+**Two branches are stacked and unpushed** — see NOW.
 **3.3 is on hold by your decision (2026-09-09)**, before the deployment target was chosen.
 **The bots stopped trading after twelve hours and nothing noticed** — sessions expire on an
 absolute TTL and `BotClient` logged in once, so `POST /orders` returned 401 for nine hours
-behind a `(healthy)` gateway. Fixed in `396a8d2`.
+behind a `(healthy)` gateway. Fixed in `396a8d2`, **merged as PR #20**, and the market is
+live again. The twelve-hour re-auth is **not yet observed** — see Blocked.
 The nine bot-session errors are **gone** — the cause was two things, a stale `dmm_qaa` password
 *and* a grant that Task 5.1's price scale had left unusable. Both fixed; 43/43 bot tests pass on
 a fresh stack.
@@ -25,22 +27,20 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Open both PRs, in order, then restart the bots** — Dev B · **next**
+**Open the two stacked PRs in order, then click through the backtest screen** — Dev B · **next**
 
-- **Two branches off `main`, both unpushed, both touching `STATUS.md`.** `gh` is not installed
-  here, so the PRs are yours. Order matters — merge `fix/bot-session-reauth` (`3103d3b`) first,
-  then rebase `task/7.1-backtester` (`a4eac8d`) onto it, or the second PR conflicts on this file.
-- **The live market is down and will stay down until you start it.** The bots image is already
-  built, so nothing is left in the command but the secret:
-  `QA_BOT_PASSWORD=... docker compose --profile bots up -d --build`
-  Then confirm `{"event":"session_reauth",...}` appears in `docker compose logs bots` at the
-  twelve-hour mark with trading continuing past it.
-- **Then 7.2, the backtest screen** — and **its gateway endpoint is Dev B's** (your decision,
-  2026-09-09). 7.2's own tech stack lists only TypeScript and React, so `/backtests` was
-  unowned until now. Ask before starting.
+- **Two stacked branches off `main`, both unpushed.** `gh` is not installed here, so the PRs
+  are yours. **`task/7.1-backtester` (`e624909`) must merge before `task/7.2-backtest-screen`
+  (`3941931`)**, or 7.2's diff will look as though it contains 7.1.
+- **7.2's criterion 1 is half verified.** The server round trip is proven live against the
+  containerised gateway; that a human can click the button and see the table is not. Run
+  `cd web && npm run dev`, sign in, and open `/backtest` against the live market.
+- **Then 7.3**, integration tests, T5 thinned. **Re-check the `runner.py`/`adapter.py` anchor
+  defect first** — Deviations says so explicitly. Ask before starting.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
-- **`STATUS.md` is 314 lines against a 250 cap** and this diff adds again. The overflow is in
-  Decisions (57 rows) and Deviations, both append-only, so trimming needs your call on what goes.
+- **`STATUS.md` is 339 lines against a 250 cap** and this diff adds again. The overflow is in
+  Decisions (63 rows) and Deviations (20), both append-only, so trimming needs your call on
+  what goes. This is now the third session it has been flagged.
 - **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
   `docker compose down -v`.
 
@@ -48,8 +48,8 @@ serves ten symbols on one `config_hash`.
 
 ## Then next
 
-1. **7.2** Backtest screen + the `/backtests` gateway endpoint (Dev B, wk 7)
-2. **7.3** Integration tests, T5 thinned (Dev B, wk 7) — re-check the anchor defect first
+1. **7.3** Integration tests, T5 thinned (Dev B, wk 7) — re-check the anchor defect first
+2. **7.5** Definition-of-done walk (joint) — blocked on Dev A's 7.4, `A:unknown` since 05 Sep
 3. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
    terminator, neither of which is mine to choose. See Blocked.
 
@@ -71,6 +71,12 @@ serves ten symbols on one `config_hash`.
 - **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
   for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
   Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
+- **Unobserved, not unfixed: the twelve-hour bot re-auth.** `396a8d2` is proven by
+  `test_session_expiry.py`, which destroys a real session with `POST /auth/logout` — the same
+  server state the TTL reaches. What has *not* happened yet is a bot running past twelve hours
+  on the fixed image. Watch for `{"event":"session_reauth",...}` in `docker compose logs bots`.
+- **On Dev A — 6.3, 6.4 and 7.4 have never been reported**, and 7.4 blocks the joint 7.5. The
+  existing ask names only 4.2, 4.3 and 5.3; these three belong in it.
 - **On you, to restart the live market:** `secrets-local.txt` is `deny`-listed in
   `.claude/settings.local.json` and the denial is enforced above that file, so I cannot read
   `QA_BOT_PASSWORD` by any route. Every step around it is done; the one command is in NOW.
@@ -114,7 +120,7 @@ serves ten symbols on one `config_hash`.
 | 6.2  Archiver | B | 6 | done | `ab40487` · 32 archiver tests · **4 of 4 criteria** · live: 702,432 records → 4,666 files over 6.28 h; container restart resumed from `1788885539965-0` |
 | 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
 | 7.1  Backtester | B | 7 | done | `fbf81ce` · 43 tests, all in the per-commit suite (+0.67s) · **5 of 5 criteria** · `test_two_runs_of_one_manifest_are_byte_identical`, `test_the_strategy_is_handed_one_bar_at_a_time_and_never_a_series`, `test_every_fill_pays_the_takers_fee_from_the_ledger_not_a_local_copy` |
-| 7.2  Backtest screen | B | 7 | todo | **includes the `/backtests` gateway endpoint** — assigned to Dev B 2026-09-09; 7.2's stated stack is TS/React only and left it unowned |
+| 7.2  Backtest screen | B | 7 | done | `3941931` · 27 tests (16 gateway, 11 web) · criterion 2 by test; criterion 1's server half verified live, browser half not — see Deviations · includes the `/backtests` endpoint, Dev B's by the 2026-09-09 decision |
 | 7.3  Integration tests (T5, thinned) | B | 7 | todo | — |
 | 7.5  Definition-of-done walk | AB | 7 | todo | — |
 
@@ -218,6 +224,12 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 | 2026-09-09 | The manifest records **no `engine_version`**; `fill_model` and `schema_version` instead | OI 011 §11f asks for one, but OI 018 §3.2 reversed 11c — no engine takes part in a Phase 1 backtest. A field naming one would assert a result depended on something it never touched, which is the class of claim a manifest exists to prevent | corrects OI 011 §11f for Phase 1 |
 | 2026-09-09 | Sharpe is **per bar and not annualised**, and is named `sharpe_per_bar` | The clock is simulated minutes at one real second each, so there is no honest number of them in a year. Annualising would mean inventing the figure's most load-bearing constant | — |
 | 2026-09-09 | A backtest's starting cash defaults to **ten times the first bar's open**, not `exchange.initial_cash_ticks` | The grant is 10,000,000,000 ticks because a market maker needs twelve full quotes of the dataset's peak. Handed to a backtest it makes a one-unit strategy 0.08% invested and rounds every metric toward zero — a run that appears to say the strategy is flat when it says the account was too big to notice it | reads the 2026-09-08 grant resize |
+| 2026-09-09 | A backtest's id **is its manifest hash**, so `POST /backtests` is idempotent | 7.1 already guarantees byte-identical output under a content hash of every input that moves a number. Two identical requests therefore collapse onto one stored result rather than a second copy under a second id — a property that was proven rather than a mechanism added. It also makes a 404 honest: the result is recomputable, so nothing is lost that cannot be asked for again | uses 7.1 criterion 2 |
+| 2026-09-09 | Backtest results live in **Redis with an hour's TTL**, never in PostgreSQL | OI 004 makes PostgreSQL a derived read model *rebuildable from the stream*. A backtest result is derived from no stream and could never be rebuilt from one, so a table of them would quietly break the property that definition rests on | implements OI 004 |
+| 2026-09-09 | The backtest runs under `asyncio.to_thread`; Redis stays on the async client | 30–230 ms of CPU on the loop of the single *producer* would delay every order acknowledgement in flight (OI 007). A fully synchronous handler would free the loop too, but needs a second connection pool to size, to fail and to explain | implements OI 007 |
+| 2026-09-09 | The screen's range is in **simulated days**, not dates | The pinned dataset is `minute_index` with no wall-clock time anywhere, so a date picker would show an invented fact. 10,080 minutes is exactly seven simulated days of 1,440 | applies OI 005 §5g |
+| 2026-09-09 | A bar range is **sliced before bars are built**, never after | Slicing built bars leaves the first bar of a range straddling the boundary — open from outside it, close from inside — so two runs over adjacent ranges would disagree about a bar they both think they own | — |
+| 2026-09-09 | The pinned dataset is **cached per process** | Re-reading 100,800 Parquet rows per request put a fifth of a second of avoidable work on the process that acknowledges orders. The file is checksum-pinned, so it cannot change under the cache without the checksum having already refused it | — |
 | 2026-09-09 | `SmaCrossover` states a **target position** and closes the gap to `portfolio.position`, rather than tracking its own long/flat flag | The flag never traded on the first full window, so a run beginning in an uptrend sat out the whole first trend. Worse, it could disagree with reality: a buy refused for want of cash left it saying "long" against a position of zero, and the strategy never tried again. Reading the real position makes a refusal self-correct | found by `test_a_rise_then_a_fall_buys_then_sells` |
 | 2026-09-09 | Re-login is **login-only**, and does not cancel resting orders | `sign_in()` registers first and its 401 branch raises about a stale `QA_BOT_PASSWORD` — the right diagnosis at start-up, the wrong one for a session that aged out. And the session expired; the orders on the book did not, so cancelling would pull a live two-sided market for nothing | — |
 
@@ -296,6 +308,15 @@ a design change.
   `config/quant_arena.toml` and nowhere else. Not fixed here: it would edit a finished Task 2.2
   process from inside 7.1 and change every existing `config_hash`. The manifest records the rates
   themselves so a result stays interpretable. **Hardening item for 7.5.**
+- **7.2 criterion 1 is half verified.** "A user runs a backtest from the interface and sees
+  results" — the server round trip is proven live against the containerised gateway (run 201,
+  a re-run returning the same id, retrieve 200, a 400 for an unknown symbol). That a human can
+  click the button and read the table is **not** measured, and it is the same
+  browser-verification deviation 5.4c and 6.1 both carry. Criterion 2 is proven by test.
+- **`web/src/routes.ts` advertised a screen the Boundaries forbid.** Its summary promised
+  "Equity curve, drawdown, metrics" while 7.2 says a metrics table only. Corrected in `3941931`
+  — a summary describing a screen nobody built is a promise the demo breaks. Worth a sweep of
+  the other route summaries before 7.5.
 
 ## How to run it right now
 
@@ -316,7 +337,7 @@ python contracts/v1/generate.py --check          # exit 1 if generated/ is stale
 python scripts/fetch_market_history.py --check   # the pinned prices are the recorded ones
 python -m services.backtest --symbol QAA --bar-minutes 5   # a backtest report
 python -m services.backtest --symbol QAA --json            # the same run, canonical JSON
-.venv/bin/python -m pytest -q                    # 803 collected: 796 pass, 7 skip
+.venv/bin/python -m pytest -q                    # 842 collected: 835 pass, 7 skip
 docker compose exec archiver sh -c 'du -sh /archive; cat /archive/_checkpoint.json'
 ```
 `test_sizes.py` needs a C++20 compiler and **skips loudly** without one; a green run carrying
