@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Annotated, AsyncIterator
 
 from fastapi import Depends, HTTPException, Request, status
+from redis.asyncio import Redis as AsyncRedis
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config.settings import Settings
@@ -37,6 +38,16 @@ def get_ratelimit(request: Request) -> RateLimiter:
 
 def get_streams(request: Request) -> StreamProducer:
     return request.app.state.streams
+
+
+def get_redis(request: Request) -> AsyncRedis:
+    """The one async Redis client, built in the lifespan.
+
+    Sessions, idempotency and rate limiting each wrap it in a purpose-built store, so this raw
+    dependency exists only for state that has no store of its own — currently just the backtest
+    results cache, which is a plain key with a TTL and would gain nothing from a class.
+    """
+    return request.app.state.redis
 
 
 def get_halt(request: Request) -> HaltState:
@@ -70,3 +81,4 @@ Config = Annotated[Settings, Depends(get_settings)]
 CurrentUser = Annotated[int, Depends(current_user_id)]
 Streams = Annotated[StreamProducer, Depends(get_streams)]
 Halt = Annotated[HaltState, Depends(get_halt)]
+Redis = Annotated[AsyncRedis, Depends(get_redis)]

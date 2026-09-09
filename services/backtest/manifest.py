@@ -22,6 +22,10 @@ contracts the fee code is written against. When Phase 2 restores engine-based fi
 could move a number was identical, so the reproducibility test compares results *under* an id
 rather than trusting that two invocations were configured the same way.
 
+`first_minute` and `last_minute` are the range in the dataset's own coordinate. The dataset
+carries no wall-clock time at all, so a date range would be an invention; `minute_index` is the
+only time there is, and the screen expresses a selection of it in simulated days.
+
 `config_hash` is the exchange's, from `config/quant_arena.toml`. It is recorded for provenance,
 and it is honest about a gap: **the maker and taker fee rates are not in that file**. They are
 module constants in `services/ledger/ledger.py`, so `config_hash` does not describe them. The
@@ -51,6 +55,8 @@ class Manifest:
     dataset: str
     dataset_sha256: str
     bar_minutes: int
+    first_minute: int
+    last_minute: int
     first_bar_index: int
     last_bar_index: int
     initial_cash_ticks: int

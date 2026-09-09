@@ -32,9 +32,46 @@ the live bar channels, answered the same way: the unit is always simulated time.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from services.bots.fairvalue import DATA_PATH, load_price_history, verify_checksum
+
+#: One simulated day. The replay clock maps one real second to one simulated minute (Open Issue
+#: 005 sub-decision 5g), so a simulated day is 1,440 of them and the pinned dataset's 10,080
+#: minutes are exactly seven. This is how a "date range" is expressed on a dataset that carries
+#: no dates: `minute_index` is the only time coordinate there is, and a day is the largest unit
+#: of it that reads like one.
+MINUTES_PER_SIMULATED_DAY = 1440
+
+
+@lru_cache(maxsize=4)
+def _cached_history(path_str: str, expected_sha256: str | None) -> dict[str, tuple[int, ...]]:
+    """The dataset, read once per process.
+
+    Cached because the gateway serves backtests per request and re-reading 100,800 Parquet rows
+    on each one puts a fifth of a second of avoidable work on a process that must stay
+    answerable to HTTP (Open Issue 007). The file is pinned and checksum-verified, so it cannot
+    change under the cache without the checksum having already refused it. Values are tuples,
+    so a caller cannot corrupt the cache for everyone else.
+    """
+    path = Path(path_str)
+    if expected_sha256:
+        verify_checksum(path, expected_sha256)
+    return load_price_history(path)
+
+
+def day_range_to_minutes(first_day: int, last_day: int) -> tuple[int, int]:
+    """Days 1..N to a half-open minute range. Day 1 is minutes 0..1439.
+
+    One-based because it is a label a person picks in a form, and a "day 0" in a dropdown reads
+    as a bug even when it is not.
+    """
+    if first_day < 1 or last_day < first_day:
+        raise ValueError(
+            f"day range must be 1 <= first <= last, got first={first_day} last={last_day}"
+        )
+    return (first_day - 1) * MINUTES_PER_SIMULATED_DAY, last_day * MINUTES_PER_SIMULATED_DAY
 
 
 @dataclass(frozen=True)
@@ -59,6 +96,8 @@ def load_bars(
     symbol: str,
     *,
     bar_minutes: int = 1,
+    first_minute: int = 0,
+    last_minute: int | None = None,
     data_path: Path | str | None = None,
     expected_sha256: str | None = None,
 ) -> tuple[Bar, ...]:
@@ -70,15 +109,23 @@ def load_bars(
     mismatch would let the manifest describe a run that never happened.
     """
     path = Path(data_path) if data_path is not None else DATA_PATH
-    if expected_sha256:
-        verify_checksum(path, expected_sha256)
-
-    history = load_price_history(path)
+    history = _cached_history(str(path), expected_sha256)
     if symbol not in history:
         raise KeyError(
             f"{symbol} is not in {path.name}. It holds: {', '.join(sorted(history))}"
         )
-    return build_bars(history[symbol], bar_minutes=bar_minutes)
+
+    closes = history[symbol]
+    end = len(closes) if last_minute is None else min(last_minute, len(closes))
+    if first_minute < 0 or first_minute >= end:
+        raise ValueError(
+            f"the requested range is empty: minutes {first_minute}..{end} of "
+            f"{len(closes)} available"
+        )
+    # Sliced *before* the bars are built, never after. Slicing built bars would leave the first
+    # bar of a range straddling the boundary — open from outside the range, close from inside —
+    # so two runs over adjacent ranges would disagree about a bar they both think they own.
+    return build_bars(closes[first_minute:end], bar_minutes=bar_minutes)
 
 
 def build_bars(closes: tuple[int, ...] | list[int], *, bar_minutes: int) -> tuple[Bar, ...]:

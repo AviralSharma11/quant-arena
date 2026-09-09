@@ -31,6 +31,7 @@ from services.gateway.ratelimit import RateLimiter
 from services.gateway.risk import RiskState
 from services.gateway.routes_auth import router as auth_router
 from services.gateway.routes_orders import router as orders_router
+from services.gateway.routes_backtests import router as backtests_router
 from services.gateway.routes_symbols import router as symbols_router
 from services.gateway.sessions import SessionStore
 from services.gateway.streams import (
@@ -201,6 +202,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(orders_router)
     app.include_router(symbols_router)
+    app.include_router(backtests_router)
     return app
 
 

@@ -29,7 +29,8 @@ def bar(index: int, open_ticks: int, close_ticks: int | None = None) -> Bar:
 def manifest(**overrides) -> Manifest:
     base = dict(
         strategy="scripted", parameters={}, symbol="QAA", dataset="test",
-        dataset_sha256="0" * 64, bar_minutes=1, first_bar_index=0, last_bar_index=1,
+        dataset_sha256="0" * 64, bar_minutes=1, first_minute=0, last_minute=2,
+        first_bar_index=0, last_bar_index=1,
         initial_cash_ticks=1_000_000, config_hash="test",
     )
     return Manifest(**{**base, **overrides})

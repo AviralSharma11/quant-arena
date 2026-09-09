@@ -229,6 +229,8 @@ def run_from_dataset(
     strategy: Strategy,
     symbol: str,
     bar_minutes: int = 1,
+    first_minute: int = 0,
+    last_minute: int | None = None,
     initial_cash_ticks: int | None = None,
     settings: Settings | None = None,
     data_path: Path | str | None = None,
@@ -245,6 +247,8 @@ def run_from_dataset(
     bars = load_bars(
         symbol,
         bar_minutes=bar_minutes,
+        first_minute=first_minute,
+        last_minute=last_minute,
         data_path=path,
         expected_sha256=settings.replay_data_sha256,
     )
@@ -256,6 +260,8 @@ def run_from_dataset(
         dataset=path.name,
         dataset_sha256=settings.replay_data_sha256,
         bar_minutes=bar_minutes,
+        first_minute=first_minute,
+        last_minute=first_minute + len(bars) * bar_minutes,
         first_bar_index=bars[0].index,
         last_bar_index=bars[-1].index,
         initial_cash_ticks=cash,

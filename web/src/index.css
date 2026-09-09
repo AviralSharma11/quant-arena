@@ -282,3 +282,61 @@ button {
   letter-spacing: 0.08em;
   color: #7a6f63;
 }
+
+/* --- Task 7.2, the backtest screen ---------------------------------------------------------
+   Deliberately plain, like every other screen: Open Issue 014 §11.1 excludes a design system,
+   and effort spent on chrome is effort not spent on the panels that constitute the
+   demonstration. Two things earn styling here — the limitation block, which Success Criterion 2
+   requires a reader to actually see, and the excess-return row, which is the number the whole
+   report exists to produce. */
+
+.backtest form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.backtest form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a6f63;
+}
+.backtest form input { width: 5rem; }
+.backtest .strategy-note { color: #7a6f63; font-size: 0.85rem; max-width: 60ch; }
+
+/* Not a footnote. The criterion is that this is visible on the page. */
+.backtest .limitation {
+  white-space: pre-wrap;
+  background: #fdf6e8;
+  border-left: 3px solid #a6472e;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  max-width: 80ch;
+}
+
+.backtest table { border-collapse: collapse; margin-top: 0.75rem; }
+.backtest caption {
+  text-align: left;
+  font-size: 0.78rem;
+  color: #7a6f63;
+  padding-bottom: 0.35rem;
+}
+.backtest th[scope="row"] {
+  text-align: left;
+  font-weight: 400;
+  color: #7a6f63;
+  padding: 0.25rem 1.5rem 0.25rem 0;
+}
+.backtest td { font-variant-numeric: tabular-nums; padding: 0.25rem 0; }
+.backtest tr.emphasis th, .backtest tr.emphasis td {
+  font-weight: 600;
+  color: #2b2620;
+  border-top: 1px solid #d9d0c0;
+  border-bottom: 1px solid #d9d0c0;
+}
