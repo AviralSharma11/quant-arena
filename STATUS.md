@@ -1,21 +1,18 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-09 · **HEAD** `3941931` (branch `task/7.2-backtest-screen`, unpushed;
+**Last updated:** 2026-09-10 · **HEAD** `6485c50` (branch `task/7.2-backtest-screen`, unpushed;
 `main` is `e1bd874`) · **Week 7**
-**State:** Week 5 closed. **6.2 merged (PR #19)** — week 6's Dev B tasks are both done.
-**7.1 and 7.2 are done.** The backtester runs and the third screen exists, so **all three
-screens are built**. On QAA the strategy loses 0.72% against the market's 0.87%, with fees
+**State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are done.** The backtester runs
+and the third screen exists, so **all three screens are built**. On QAA the strategy loses 0.72% against the market's 0.87%, with fees
 alone costing 0.82% of the account — the comparison earning its place.
 **835 pass, 7 skipped, none failing**, with the matcher restarted first. No xfails remain.
-**Two branches are stacked and unpushed** — see NOW.
+**The two branches are now genuinely stacked** — they had diverged at `e624909`, with 7.2's
+status commit sitting on the 7.1 branch. Rebased 2026-09-10: `task/7.1-backtester` ends at
+`e624909`, `task/7.2-backtest-screen` is that plus `3941931` plus `6485c50`. Both unpushed.
 **3.3 is on hold by your decision (2026-09-09)**, before the deployment target was chosen.
-**The bots stopped trading after twelve hours and nothing noticed** — sessions expire on an
-absolute TTL and `BotClient` logged in once, so `POST /orders` returned 401 for nine hours
-behind a `(healthy)` gateway. Fixed in `396a8d2`, **merged as PR #20**, and the market is
-live again. The twelve-hour re-auth is **not yet observed** — see Blocked.
-The nine bot-session errors are **gone** — the cause was two things, a stale `dmm_qaa` password
-*and* a grant that Task 5.1's price scale had left unusable. Both fixed; 43/43 bot tests pass on
-a fresh stack.
+**The market is live and the twelve-hour re-auth is now observed** — `396a8d2` (PR #20)
+answered the 401s that had stopped the bots; 40 `session_reauth` events over a 21-hour run,
+first at 2026-09-09T20:25:27Z, no bot errors since.
 **Dev A reported 1.2, 2.3, 2.4, 3.4 and 4.1 done (2026-09-05)**; the stack matches in C++ and
 serves ten symbols on one `config_hash`.
 **Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
@@ -27,20 +24,18 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Open the two stacked PRs in order, then click through the backtest screen** — Dev B · **next**
+**Open the two PRs in order, then click through the backtest screen** — Dev B · **next**
 
-- **Two stacked branches off `main`, both unpushed.** `gh` is not installed here, so the PRs
-  are yours. **`task/7.1-backtester` (`e624909`) must merge before `task/7.2-backtest-screen`
-  (`3941931`)**, or 7.2's diff will look as though it contains 7.1.
-- **7.2's criterion 1 is half verified.** The server round trip is proven live against the
-  containerised gateway; that a human can click the button and see the table is not. Run
-  `cd web && npm run dev`, sign in, and open `/backtest` against the live market.
-- **Then 7.3**, integration tests, T5 thinned. **Re-check the `runner.py`/`adapter.py` anchor
-  defect first** — Deviations says so explicitly. Ask before starting.
+- **The stack is fixed and unpushed.** `gh` is not installed here, so the PRs are yours.
+  `main` ← `task/7.1-backtester` first, then `task/7.1-backtester` ← `task/7.2-backtest-screen`,
+  or 7.2's diff will look as though it contains 7.1.
+- **7.2's criterion 1 is half verified.** The server round trip is proven live — the running
+  gateway answers `POST /backtests` with 401 where a bogus path gives 404, so the route is
+  deployed. That a human can click the button and read the table is not. Run
+  `cd web && npm run dev`, sign in, open `/backtest` against the live market.
+- **Then 7.3**, integration tests, T5 thinned. The anchor re-check is **done** — it is dormant,
+  not blocking. Ask before starting.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
-- **`STATUS.md` is 339 lines against a 250 cap** and this diff adds again. The overflow is in
-  Decisions (63 rows) and Deviations (20), both append-only, so trimming needs your call on
-  what goes. This is now the third session it has been flagged.
 - **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
   `docker compose down -v`.
 
@@ -48,7 +43,7 @@ serves ten symbols on one `config_hash`.
 
 ## Then next
 
-1. **7.3** Integration tests, T5 thinned (Dev B, wk 7) — re-check the anchor defect first
+1. **7.3** Integration tests, T5 thinned (Dev B, wk 7) — no `tests/integration/` exists yet
 2. **7.5** Definition-of-done walk (joint) — blocked on Dev A's 7.4, `A:unknown` since 05 Sep
 3. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
    terminator, neither of which is mine to choose. See Blocked.
@@ -71,10 +66,6 @@ serves ten symbols on one `config_hash`.
 - **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
   for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
   Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
-- **Unobserved, not unfixed: the twelve-hour bot re-auth.** `396a8d2` is proven by
-  `test_session_expiry.py`, which destroys a real session with `POST /auth/logout` — the same
-  server state the TTL reaches. What has *not* happened yet is a bot running past twelve hours
-  on the fixed image. Watch for `{"event":"session_reauth",...}` in `docker compose logs bots`.
 - **On Dev A — 6.3, 6.4 and 7.4 have never been reported**, and 7.4 blocks the joint 7.5. The
   existing ask names only 4.2, 4.3 and 5.3; these three belong in it.
 - **On you, to restart the live market:** `secrets-local.txt` is `deny`-listed in
@@ -89,38 +80,15 @@ serves ten symbols on one `config_hash`.
 
 | Task | Own | Wk | Status | Evidence / note |
 |---|---|---|---|---|
-| 1.1  Contracts — schema, REST, WS shapes | AB | 1 | done | `1ced47a` built, `a37b49b` frozen · 233 tests pass |
-| 1.2  Naive Python model engine | A | 1 | A:done | reported 2026-09-05 · maker-price fix `e8bc8e9` |
-| 2.3  Hand-written matching scenarios (T1) | A | 1 | A:done | reported 2026-09-05 |
-| 1.3  Gateway skeleton + stub engine | B | 1 | done | `4c09dfa` · 52 gateway tests pass · real Redis + Postgres |
-| 1.4  Local Docker stack + shared config | B | 1 | done | `84c270e` · verified from a fresh clone, 34s to all-healthy |
-| 5.4a Frontend scaffold (Vite/TS/React) | B | 1 | done | `94fbe04` · 10 tests · builds, serves, 3 routes |
-| 2.4  C++ engine — order book and match loop | A | 2 | A:done | reported 2026-09-05 · `e4352c1`, arrival-order fix `e8bc8e9` |
-| INT1 Stub engine → naive model over the stream | B | 2 | done | `8210d3a` · 21 matcher tests · live restart replayed 26, appended 0 |
-| 2.1  Redis Streams, durability, halt state | B | 2 | done | `8fd72bc` · 359 tests pass · durability 72k/s measured |
-| 2.2  Ledger writer + replay rebuild | B | 2 | done | `2948867` · 11 ledger tests pass · replay rebuild and maker/taker fees verified |
-| 5.4b Auth screens | B | 2 | done | `bd321b3` · login, registration, and session rehydration verified · 302 tests pass |
-| 3.4  C++ engine complete + nanobind | A | 3 | A:done | reported 2026-09-05 · **no nanobind in the repo — see Deviations** |
-| 3.1  Risk checks + in-memory reservations | B | 3 | done | `6c67e01` · sells reserve inventory not cash; `INSUFFICIENT_POSITION` now raised · 5 of 6 criteria; criterion 3 unverified, see Deviations |
-| 3.2  Idempotency — atomic claim-and-append | B | 3 | done | merged `6213651`, defects fixed `fb2cd8a` · 6 of 6 criteria · concurrent burst now yields exactly one order · **unblocks Dev A 6.4** |
 | 3.3  Public deployment and CI | B | 3 | todo | **half merged** `5efe462` — CI gate, nightly, multi-arch images. Criteria 1 and 3 (HTTPS, one-command redeploy) outstanding; see Deviations |
-| 4.1  Differential/property/determinism (T2–T4) | A | 4 | A:done | reported 2026-09-05 · `2930cb2` · 4 tests, 2 Hypothesis properties at 100 examples |
-| 4.4  Bots — market maker and noise traders | B | 4 | done | `68c7821` · live: 130 fills in 45s, both makers meeting their uptime obligation, units conserved at 0 per symbol · session re-auth `396a8d2`, 55 bot tests |
-| 5.2a Fan-out process begins | B | 4 | done | `0eb5329` · 38 tests · derived book matches the matcher order-for-order across a 400-record sequence; live 706 records recovered |
-| 5.4c WS client, gap detection, rAF loop | B | 4 | done | `78ed4dc` · 26 tests · reconnect re-subscribes, a deliberate private gap triggers exactly one resync; criterion 5 mechanism-verified, profiler check manual |
 | 4.2  Engine process, Redis, replay recovery | A | 5 | A:todo | reported unfinished 2026-09-05 · `b644130` merged and live in compose |
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
-| 5.2b Fan-out completes — conflation, WS server | B | 5 | done | `1c87a13` · 37 tests · 5 of 5 criteria · 400 encodes at 1, 50 and 200 clients; ack median 3.50→3.65 ms · **unblocks Dev A 6.3** |
-| 5.1  Crypto fair value, replay clock, 10 symbols | B | 5 | done | `a67f1a4`, criterion 2 closed by Dev A's `0faeea7` · **5 of 5 criteria** · `test_the_replay_ratio_reaches_the_stream`, `test_gateway_stamps_replay_configuration_at_startup`; the strict `xfail` is removed, having failed the day the amendment landed |
-| 6.1a Trading screen begins | B | 5 | done | `34b7cb0` · 56 web tests · book, tape, chart, ten live symbol tabs; no criteria of its own, 6.1b carries them |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
-| 6.1b Trading screen completes | B | 6 | done | `e9bff3f`, merged `1ee2391` · `tests/web/test_trading_private.py`, 17 tests · 4 of 5 criteria verified in a browser against the live market; see Deviations |
-| 6.2  Archiver | B | 6 | done | `ab40487` · 32 archiver tests · **4 of 4 criteria** · live: 702,432 records → 4,666 files over 6.28 h; container restart resumed from `1788885539965-0` |
 | 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
 | 7.1  Backtester | B | 7 | done | `fbf81ce` · 43 tests, all in the per-commit suite (+0.67s) · **5 of 5 criteria** · `test_two_runs_of_one_manifest_are_byte_identical`, `test_the_strategy_is_handed_one_bar_at_a_time_and_never_a_series`, `test_every_fill_pays_the_takers_fee_from_the_ledger_not_a_local_copy` |
-| 7.2  Backtest screen | B | 7 | done | `3941931` · 27 tests (16 gateway, 11 web) · criterion 2 by test; criterion 1's server half verified live, browser half not — see Deviations · includes the `/backtests` endpoint, Dev B's by the 2026-09-09 decision |
+| 7.2  Backtest screen | B | 7 | done | `3941931` · 27 tests (16 gateway, 11 web) · criterion 2 by test; criterion 1's server half verified live, browser half not — see Deviations · `tests/web/` + `tests/backtest/` 129 pass on `6485c50` · includes the `/backtests` endpoint, Dev B's by the 2026-09-09 decision |
 | 7.3  Integration tests (T5, thinned) | B | 7 | todo | — |
 | 7.5  Definition-of-done walk | AB | 7 | todo | — |
 
@@ -144,64 +112,7 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 
 | Date | Decision | Why | Amends |
 |---|---|---|---|
-| 2026-08-31 | Repo layout: `contracts/` `services/` `engine/` `web/` `config/` | Every session was going to guess paths otherwise | closes a STATUS open question; belongs in `CLAUDE.md` |
-| 2026-08-31 | `client_order_id` is `uint64` | OI 008 says "opaque, client-assigned"; Criterion 5 forbids strings and variable-width. An integer satisfies both | — |
-| 2026-08-31 | `schema.toml` is TOML via stdlib `tomllib` | Declarative, and no dependency outside the closed stack list | — |
-| 2026-08-31 | `seq` is derived from the Redis stream id on read, never authored | A producer cannot know its own id before `XADD` returns; `with_seq()` applies it and every replay re-derives it | implements OI 003, no parallel counter |
-| 2026-08-31 | Consumers accept the **current** `schema_version` only | OI 016 §2 justified compatibility as "one snapshot interval", but OI 018 §13.1 removed snapshots. A breaking change during development means truncate and rebuild | corrects OI 016 §2 |
-| 2026-08-31 | **Contracts v1 frozen**, both developers signed off | Everything from here is written against it; a change now needs both developers, a `schema_version` bump and a stream truncation | — |
-| 2026-08-31 | `open-issues/` un-gitignored and committed (`e6f2370`) | `CLAUDE.md` cites 001–019 as the top precedence tier; untracked files cannot be that | — |
-| 2026-08-31 | `INITIAL_CASH_TICKS` in `config/settings.py`, default 1,000,000 ticks | The grant amount is specified nowhere in the plan or the 19 open issues; 4.4's bots will need their own figure and this is where it goes | — |
-| 2026-08-31 | Gateway maps `RequestValidationError` to `400` | FastAPI's default is `422`; OI 008 §9h and 1.3 criterion 3 both require `400`. Without the handler the criterion fails silently | — |
-| 2026-08-31 | Money and timestamp columns declared `BIGINT` explicitly | A bare SQLModel `int` is a 32-bit `INTEGER` and holds neither an int64 tick amount nor a nanosecond timestamp | — |
-| 2026-08-31 | **Configuration and infrastructure are split.** Domain parameters live in `config/quant_arena.toml` and nowhere else — no env override, no code default, a missing value raises. Connection URLs, secrets and cookie `Secure` come from the environment and are **not** hashed | 1.4's boundary ("one file is the point") cannot be absolute: the gateway reaches PostgreSQL at `postgres` in Docker and `localhost` on a laptop, and a password must not be version controlled. More importantly, a connection URL inside the hash would change it when the *configuration* had not — destroying the one question the hash answers | interprets 1.4's boundary; OI 007 §8d |
-| 2026-08-31 | `[symbols]` left empty in the config file | The ten symbols and tick sizes are Task 5.1's to decide from replayed crypto history. An invented list would look settled without being so | — |
-| 2026-08-31 | Config hash goes to the **log** in 1.4, and to the stream in 2.1 | OI 007 §8d wants it stamped into the event stream; there is no stream until 2.1 | stages OI 007 §8d |
-| 2026-08-31 | `react-router-dom` added to the closed stack list | React ships no router and the three screens need one; the ~40-line hand-rolled alternative was weighed and rejected because 5.4b also needs a protected-route wrapper | **amends `CLAUDE.md` and OI 019** — applied in `3df522c` |
-| 2026-08-31 | No JavaScript test framework | Node 24 strips TypeScript natively, so the route table is inspected and the built app served from the existing pytest suite. Keeps the closed list one dependency wider, not three | — |
-| 2026-08-31 | Frontend stays out of `docker-compose.yml` | 1.4 is closed and deployment is 3.3's. The Vite dev server runs on the host against the containerised gateway | — |
-| 2026-09-02 | Recovery counts **anchors** — one outbound record per inbound record — instead of a checkpoint | A replay that re-appended its outbound records would duplicate fills that moved real positions. No snapshot (OI 018 §13.1) and no field added to a frozen schema | implements OI 018 §13.1 |
-| 2026-09-02 | The matcher holds **one book per `symbol_id`** | `naive_model.OrderBook.match()` crosses on price alone; a single book would trade symbol 3 against symbol 7 | — |
-| 2026-09-05 | Both matching engines use the **resting maker's** price | Arrival sequence is tracked explicitly, covering a seller crossing a higher resting bid; Python, C++ and adapter regression tests agree | resolves the maker-price defect |
-| 2026-09-02 | `StubEngine`, `engine_port.py` and the `Engine` dependency deleted | The seam CLAUDE.md asked to keep behind a thin interface is now the stream itself | closes the one load-bearing stub, Appendix D.2 |
-| 2026-09-02 | One image for gateway and matcher; `engine/` un-ignored in `.dockerignore` | They differ only in their command, so one image means they cannot drift onto different dependency sets. `engine/cpp` stays excluded — nothing in the image compiles it | — |
-| 2026-09-02 | `IdempotencyStore.claim()` reports **which caller won the key** | The Lua claim was always atomic, but the route collapsed "I claimed it" and "someone else holds it, in flight" into one status and submitted in both cases. That distinction is the whole of Success Criterion 3.2.2 | — |
-| 2026-09-02 | The risk replay **completes during startup**, before the first request is served | Starting the watcher and yielding leaves a window in which the gateway answers with every commitment forgotten | implements 3.1 criterion 4 |
-| 2026-09-02 | A reservation is released at the **limit** price, never the fill price | It was taken at the limit, so releasing at the fill strands the price improvement for the life of the process | implements 3.1 criterion 2 |
-| 2026-09-02 | Market-order band is `limits.market_order_band_bps`, 500 bps | 3.1 names `best_ask × 1.05`. It is the only thing between a market order and a thin book, so it is configuration, not a constant. Per-symbol bands belong with the symbol table in 5.1 | — |
-| 2026-09-02 | Top of book is **derived** from the resting orders the gateway already tracks | The gateway records every `OrderAccepted` for reservation accounting anyway, so a band needs a query, not a second book to keep in step | — |
-| 2026-09-04 | Registration appends `CreateAccount` to the stream; the response carries no `cash_ticks` | Writing the `accounts` row directly made PostgreSQL the source of truth for a balance, and left `LedgerConsumer` unable to run — it rebuilds accounts by replay, and a stream without the grant replays every balance to zero | implements OI 004; amends 1.3's criterion, see Deviations |
-| 2026-09-04 | Rate limiting runs **ahead of** the idempotency claim | A 429 after the claim answers that `client_order_id` "rejected" for the whole TTL, so the client's correct retry keeps getting the refusal — a transient limit turned into a permanently dead order id | implements OI 015 §11.1 |
-| 2026-09-04 | Designated market makers are an explicit **list of usernames** in `bots.designated_market_maker_accounts` | A prefix rule like `dmm_*` would let anyone register into the exemption. Config is version controlled and hashed, so the grant is auditable | implements OI 005 §10.6 |
-| 2026-09-04 | `[symbols]` holds provisional QAA/QAB, and `GET /symbols` serves them | 4.4's bots need something to quote and 5.4c cannot resolve a `symbol_id` without it. Names deliberately meaningless — a placeholder reading like a real ticker is the one that survives into the demo | 5.1 replaces the block wholesale |
-| 2026-09-04 | A bot's `client_order_id` starts from a **millisecond timestamp**, never 1 | A counter restarting at 1 re-sent keys the idempotency store had already answered: every order acknowledged, none appended, the market dead while every participant reported success | — |
-| 2026-09-04 | `seq` means different things per channel: gap detection is **private-only** | On market data `seq` is the stream id and the channel carries only some of the stream's records, so a jump is normal. Book gaps are self-healing anyway (§3.5). Only the private counter is dense | pending Dev A, see Blocked |
-| 2026-09-04 | Bots run behind a compose **profile**; fan-out gets no compose service until 5.2b | A stack that always has a live market is wanted for a demo and unwanted under a test suite. A container serving nobody is a container doing nothing observable | — |
-| 2026-09-04 | Fan-out **derives** the book from OrderAccepted/Fill/OrderCancelled rather than from `BookChanged` | Nothing emits `BookChanged`; making the matcher emit it would require the same of Dev A's C++ engine in week 5, creating the same-week cross-developer dependency D.4 forbids. Derived is also engine-agnostic, so the week-5 swap does not touch fan-out | `services/fanout/README.md` §1 |
-| 2026-09-04 | Fan-out keeps its **own** `Book` rather than sharing a resting-order projection | risk.py, ledger.py and matcher/adapter.py already each rebuild resting orders; four shapes differ enough that one abstraction serving all would be worse. Duplication chosen with open eyes — revisit at a fifth consumer, or at the first disagreement | `services/fanout/README.md` §2 |
-| 2026-09-04 | Price levels are **aggregated on read**, not maintained | A maintained map is a second structure that can drift from the first; summing cannot. First file to open when fan-out is measured as the bottleneck | `services/fanout/README.md` §3 |
-| 2026-09-04 | Bars bucket on **stream time**, with the width in `market_data.bar_bucket_seconds` | The replay clock in 5.1 makes "one-minute bar" ambiguous — one real minute or one simulated minute — and 7.1's backtester consumes whichever it means. Configuration so 5.1 answers it by changing a line | stages Open Issue 005 §10.5 |
-| 2026-09-05 | `seq` on `private` is a **dense per-user counter**, not the stream id | §3.4's example shows a stream id, which counts every record on the stream and so is dense for nobody — read literally, no private gap is detectable and 5.2's fourth criterion is unmeetable by any implementation | reads §3.4 against §3.5 and OI 006 §7c; HANDOFF Q1 |
-| 2026-09-05 | A market frame for a busy client is **skipped**; a private message is **buffered, then the connection closed** | The droppable/non-droppable distinction at the last hop. The next snapshot supersedes a skipped frame; nothing supersedes a lost fill | implements OI 006's slow-client policy |
-| 2026-09-05 | The gateway **publishes** its halt state to `qa:halt`; fan-out relays it | The halt flag is in gateway memory (OI 004) and fan-out is another process, so nothing could send §3.6's `halted`. Fan-out pinging Redis was rejected — "fan-out can reach Redis" is not "the gateway can durably record orders", and a readable-but-not-writable store separates them in the direction that matters | — |
-| 2026-09-05 | **Q1 answered: `seq` on `private` is the dense per-user counter**, as implemented | Dev A confirmed the reading. §3.4's stream-id example is illustrative and wrong; the counter is what makes 5.2's fourth criterion measurable | closes HANDOFF Q1 |
-| 2026-09-05 | **Q2 answered: `resumed` accepted. Contracts v1 Amendment 1**, agreed by both developers | A halt clears on its own, and the four original codes cannot say so. Additive; `schema_version` **not** bumped — the binary records are untouched, this is the browser wire | amends `contracts/v1/rest_and_ws.md` §3.6 |
-| 2026-09-05 | **Q3 answered: `bars:*` carries `seq`**, as implemented | The rule in §3.5 governs; §3.3's example is abbreviated. A channel without `seq` is the one channel no client could gap-check | closes HANDOFF Q3 |
-| 2026-09-05 | **Q4 answered: the C++ engine emits no `BookChanged`** | `engine/cpp/stream_engine.cpp` enumerates its outputs and the type is absent. Fan-out's derived book stands and the engine swap did not touch it | closes HANDOFF Q4 |
-| 2026-09-05 | **Q5 answered: both engines price at the resting maker** | Dev A's `e8bc8e9` tracks arrival order in the Python model and the C++ book; the adapter's override was removed | closes HANDOFF Q5 |
-| 2026-09-07 | The trading screen owns **one** frame loop; panels register paint callbacks | `takeChanged()` clears the changed set, so with a loop per panel the first to run consumes the change and the rest paint nothing. A correctness constraint, not a performance preference | — |
-| 2026-09-07 | 6.1a is the **market half**, 6.1b the **private half** | Market data is high-frequency and droppable and stays out of React; private data is low-frequency and never dropped, and React state is right for it. `buffer.ts`'s rule is about frequency, not principle | splits 6.1a/6.1b |
-| 2026-09-07 | `formatTicks` **throws** without a tick size rather than defaulting to 1 | A default renders 7,983,040 ticks as "7983040" beside a correct price — a plausible number instead of a visible failure. OI 014 §14e covers a misplaced decimal point too | — |
-| 2026-09-07 | `STREAM_SYMBOLS` **deleted**, not lengthened to ten | A hard-coded list of ten has the same defect one listing later. §2.3 makes `GET /symbols` the only source of names and scales | closes a 5.1 loose end |
-| 2026-09-07 | A repeated `bar_open_ns` **replaces**; the series is bounded at 600 | A reconnecting client re-receives bars it has drawn, and appending them puts two candles at one x position — which reads as an exchange bug, not a client one | — |
-| 2026-09-07 | `lightweight-charts` 5.2.1 added | Named on `CLAUDE.md`'s closed stack list, so no approval needed. Fed from the bar buffer on the frame loop, never from React state | — |
-| 2026-09-06 | `bars:*:1m` means one **simulated** minute; both bucket widths kept | A real minute holds sixty simulated minutes of price action, so a chart on real minutes compresses an hour into one candle. This is the question the config file parked for 5.1 | settles `market_data.bar_bucket_seconds` |
-| 2026-09-06 | The replay clock is a **function of elapsed real time**, never a counter | A counter drifts whenever a quoting loop runs late, and two bots each keeping their own would disagree about what time it is — two symbols replaying at different speeds, unreproducibly | — |
-| 2026-09-06 | `next_ticks()` is a **lookup, not a step** | Indexing on the clock means a slow loop rejoins the market rather than walking forward through stale prices | — |
-| 2026-09-06 | The dataset's **checksum** lives in `[replay].data_sha256`, its **path** in code | *Which* prices the market replays is a domain parameter every process must agree on, so it is hashed; *where the file sits* is infrastructure. One source of truth, nothing for a sidecar to drift from | applies the 2026-08-31 config/infrastructure split |
-| 2026-09-06 | Ten symbols carry the **real tick sizes** of the instruments behind them | Four distinct values, not the provisional 1. A table where every tick size was 1 asserts all ten trade on one scale, which is what made the old block provisional | — |
-| 2026-09-06 | A symbol missing from the data file **falls back**; a data file that fails its checksum **raises** | Absent means "you are offline"; wrong means "you are about to generate a session nobody can reproduce" | — |
-| 2026-09-05 | Session lookups use a **blocking** Redis pool | redis-py's default pool *raises* when exhausted: 200 browsers reconnecting at once refused 73 of themselves. A session lookup is one local GET, so queueing is invisible and failing is a dead feed | found by `benchmarks/bench_fanout.py` |
+| 2026-09-10 | The anchor defect is **dormant, not live**; nothing is owed before 7.3 | `ConfigureReplay` (type 5) is forwarded by `adapter.py:_forward` as one `ReplayConfigured`, and `ReplayConfigured` is in `runner.py:is_anchor` — Amendment 2 closed its own candidate as it landed. Inbound types 1–5 each produce exactly one anchor, so no zero-anchor type exists at `schema_version` 2 | re-checks the 2026-09-09 entry |
 | 2026-09-08 | **The grant is 10,000,000,000 ticks**, was 1,000,000 | Task 5.1 raised prices to 8,208,718 ticks and left the week-1 grant behind: it could not buy one unit of six of the ten symbols, and every market maker reported `two_sided_uptime: 0.0` with `INSUFFICIENT_CASH` on every bid — one-sided books, the exact failure OI 005 §5e says a DMM prevents. Sized at 12 full quotes of the dataset's peak | resizes the 2026-08-31 grant |
 | 2026-09-08 | A bar channel is named in **simulated** time: the 1-second bucket is `1m`, the 60-second bucket `1h` | `_WIDTH_SUFFIX` labelled by literal seconds, so `bars:*:1m` carried 60-second buckets — one candle per *real* minute, the compression the 2026-09-06 decision was written to prevent. `width_label` now divides by the ratio | implements the 2026-09-06 decision |
 | 2026-09-08 | The idempotency **in-flight sentinel** expires in 30 s; only a recorded outcome keeps the hour | One key served two lifetimes. A gateway dying between claim and record left `in_progress` with no outcome, so every retry got `202 in_progress` for a full hour — an order neither placed nor refused | — |
@@ -258,39 +169,20 @@ a design change.
   record on every session's inbound stream and carries the ratio plus
   `config_hash_hi`/`config_hash_lo` — which also closes the 31 Aug decision "config hash to the
   stream in 2.1", never implemented at the time. `schema_version` is now 2.
-- **6.2 criterion 4 came in under the estimate, not on it.** 55 MB/day measured over 6.28 h of the
-  live ten-symbol bot market (14.5 MB total); 113 MB/day synthetic. Open Issue 018 §11.1 says
-  ~345 MB/day, but that figure is uncompressed at full ten-level depth, and this writes zstd over a
-  long table while the bot book quotes two or three levels a side. The test band is written around
-  the measurement. Re-measure under 6.3's load generator, where the book is deeper.
-- **Bars occupy more bytes than snapshots while holding a third of the rows** — 1,553 files at a
-  median 3.4 kB, mostly Parquet footer. One file per flush unit per symbol per dataset is the price
-  of the low-water checkpoint; a longer flush unit means fewer, fatter files and a proportionally
-  longer checkpoint lag. One line to change if the file count ever matters.
-- **The `runner.py`/`adapter.py` anchor defect is now live, not dormant.** It was dormant only
-  while no record type produced zero anchors; Amendment 2 created the first candidate. Re-check
-  before 7.3.
 - **Latent defect, found not fixed: `runner.py` documents "every inbound record produces exactly
   one anchor" while `adapter.py` returns `[]` for unknown types.** Recovery counts anchors as its
   bookmark, so the first type producing none makes a restarted matcher re-process an answered
-  order and duplicate a fill. Both engines carry it — dormant until Amendment 2 creates the
-  first such type, which is why that amendment forwards rather than ignores it.
-- **Fan-out was not running and the gateway was a build behind**, found while wiring 6.1a: two
-  processes on different `config_hash`es, the split that hash exists to catch. Nothing alarmed.
+  order and duplicate a fill. Re-checked 2026-09-10: Amendment 2 did **not** create such a type
+  — `ConfigureReplay` is forwarded as one `ReplayConfigured` and `ReplayConfigured` is in
+  `is_anchor`. Inbound types 1–5 each produce exactly one anchor, so it stays latent for a
+  future type. **`runner.py`'s anchor table omits `ConfigureReplay` while `is_anchor` counts
+  it** — documentation only, a 7.5 hardening item.
+- **7.2's status commit was made on the wrong branch.** `b999bc7` recorded 7.2 done on
+  `task/7.1-backtester`, which held none of 7.2's code, and this file's HEAD stamp named a
+  branch that was not checked out. Rebased onto 7.2 as `6485c50` on 2026-09-10.
 - **5.2's Criterion 1 was measured on one machine, not a separated topology.** Gateway, fan-out,
   200 sockets and the harness shared ten cores. Median (+4.2%) and encode counts hold; p95 and
   max are pessimistic — re-measure for 7.4.
-- **The bot session tests need a stack the compose bots have not been running on.** They share
-  the same thirty-one accounts, so accumulated inventory and resting orders make five of them
-  fail. 43/43 pass on a fresh stack; `docker compose stop bots` alone is not enough.
-- **`docker compose up --build -d` never rebuilds the bots image**, because the `bots` profile is
-  not active for that command. Caught when the bots came up on a hash matching neither the file
-  nor the other four processes, reporting `"market_makers":2` — the pre-5.1 table. Pass `--build`
-  with the profile, and read the startup hash line.
-- **Two tests were pinned to the old grant and one had stopped testing anything.**
-  `test_reserved_cash_does_not_leak_on_retry` was sized in absolute ticks against 1,000,000, so
-  after the resize its three orders no longer exhausted the account and the assertion that caught
-  a double-reservation passed vacuously. Both now derive from `settings.initial_cash_ticks`.
 - **Fourth healthy-but-idle fault**, after fan-out not running, the matcher dead-but-healthy, and
   the archiver failing every `mkdir`. The gateway was genuinely fine — it was answering 401
   correctly — so no healthcheck could have caught this one. It was found only by comparing
@@ -313,11 +205,6 @@ a design change.
   a re-run returning the same id, retrieve 200, a 400 for an unknown symbol). That a human can
   click the button and read the table is **not** measured, and it is the same
   browser-verification deviation 5.4c and 6.1 both carry. Criterion 2 is proven by test.
-- **`web/src/routes.ts` advertised a screen the Boundaries forbid.** Its summary promised
-  "Equity curve, drawdown, metrics" while 7.2 says a metrics table only. Corrected in `3941931`
-  — a summary describing a screen nobody built is a promise the demo breaks. Worth a sweep of
-  the other route summaries before 7.5.
-
 ## How to run it right now
 
 ```bash
@@ -353,8 +240,11 @@ that skip has not verified 1.1's Criterion 3.
 
 - **Week 1 — closed 31 Aug, 3 days early.** 1.1 · 1.3 · 1.4 · 5.4a. 331 tests green.
 - **Week 2 — closed 2 Sep.** 2.1 · 2.2 · 5.4b · integration point 1. 398 tests green.
-- **Week 3 — closed 4 Sep.** 3.1 · 3.2 · 3.3 (deployment half deferred). Six defects fixed by
-  audit and by running it; a criterion is verified by exercising it, not by unit tests passing.
-- **Week 4 (18–24 Sep) — closed 4 Sep.** Pre-work: symbol registry, rate limiting, and a ledger
-  that finally runs · designated market makers · 4.4 bots · 5.2a fan-out begins · 5.4c
-  WebSocket client and rAF loop. 565 tests green. Seven commits, unpushed.
+- **Week 3 — closed 4 Sep.** 3.1 · 3.2 · 3.3 (deployment half deferred). Six defects found by
+  audit and by running it: a criterion is verified by exercising it, not by unit tests passing.
+- **Week 4 — closed 4 Sep.** Symbol registry, rate limiting, a ledger that runs · market makers
+  · 4.4 bots · 5.2a · 5.4c. 565 tests green.
+- **Week 5 — closed 8 Sep.** 5.1 crypto fair value and replay clock · 5.2b conflation and WS
+  server · 6.1a. Amendment 2 (`ConfigureReplay`) landed and both integration points passed.
+- **Week 6 — closed 9 Sep.** 6.1b · 6.2 archiver, 702,432 records to 4,666 files over 6.28 h.
+  The bot session-expiry fault was found and fixed here (PR #20), not by a test.
