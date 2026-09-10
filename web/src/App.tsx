@@ -4,6 +4,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react
 import { ConnectionIndicator } from "./components/ConnectionState";
 import { ROUTES } from "./routes";
 import { Auth, type UserSession } from "./screens/Auth";
+import { Backtest } from "./screens/Backtest";
 import { Placeholder } from "./screens/Placeholder";
 import { Trading } from "./screens/Trading";
 import {
@@ -221,6 +222,8 @@ export default function App() {
               element={
                 route.id === "auth" ? (
                   <Auth user={user} onLogin={handleLogin} onLogout={handleLogout} />
+                ) : route.id === "backtest" ? (
+                  <Backtest symbols={symbols} signedIn={user !== null} />
                 ) : route.id === "trading" ? (
                   <Trading
                     buffer={stream?.buffer ?? null}

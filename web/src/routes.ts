@@ -41,8 +41,11 @@ export const ROUTES: readonly RouteDefinition[] = [
     id: "backtest",
     path: "/backtest",
     title: "Backtest",
+    // No equity curve and no drawdown chart: Task 7.2's Boundaries say a metrics table only.
+    // The range is in *simulated days* rather than dates — the pinned dataset carries a minute
+    // index and no wall-clock time, so a date picker would show an invented fact.
     summary:
-      "Strategy picker, symbol, date range, run. Equity curve, drawdown, metrics, buy-and-hold comparison.",
+      "Strategy picker, symbol, simulated-day range, bar width. Metrics table with the buy-and-hold comparison and the fill-model limitation.",
     builtBy: "Task 7.2",
   },
 ] as const;
