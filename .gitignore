@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .hypothesis/
 node_modules/
+.claude/
 
 # macOS / iCloud Drive sync conflicts. The repository lives under ~/Documents, which iCloud
 # syncs by default, and a conflict is written beside the original as "schema 2.toml" rather
