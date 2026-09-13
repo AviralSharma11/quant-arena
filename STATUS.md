@@ -1,21 +1,15 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-13 · **HEAD** `8765203` (branch `task/ui-redesign`, uncommitted work;
-PRs #21 and #22 merged) · **Week 7**
-**State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are done.** The backtester runs
-and the third screen exists, so **all three screens are built**. On QAA the strategy loses 0.72% against the market's 0.87%, with fees
-alone costing 0.82% of the account — the comparison earning its place.
-**835 pass, 7 skipped, none failing**, with the matcher restarted first. No xfails remain.
-**The two branches are now genuinely stacked** — they had diverged at `e624909`, with 7.2's
-status commit sitting on the 7.1 branch. Rebased 2026-09-10: `task/7.1-backtester` ends at
-`e624909`, `task/7.2-backtest-screen` is that plus `3941931` plus `6485c50`. Both unpushed.
-**3.3 is on hold by your decision (2026-09-09)**, before the deployment target was chosen.
-**The market is live and the twelve-hour re-auth is now observed** — `396a8d2` (PR #20)
-answered the 401s that had stopped the bots; 40 `session_reauth` events over a 21-hour run,
-first at 2026-09-09T20:25:27Z, no bot errors since.
+**Last updated:** 2026-09-10 · **HEAD** `18e63db` (branch `task/7.3-integration-tests`,
+unpushed; `main` is `8765203`, level with `origin/main`) · **Week 7**
+**State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
+three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
+costing 0.82% of the account. **7.3 is built and green** — four integration tests against the
+live stack, both layer-blame branches proven by breaking it on purpose. **804 pass, 7 skipped**,
+none failing. **3.3 is on hold by your decision (2026-09-09)**. **The market is live**, and the
+twelve-hour bot re-auth was observed on 2026-09-09 (see Archive).
 **Dev A reported 1.2, 2.3, 2.4, 3.4 and 4.1 done (2026-09-05)**; the stack matches in C++ and
-serves ten symbols on one `config_hash`.
-**Contracts (1.1):** **FROZEN 2026-08-31**, agreed by both developers. `contracts/v1/`.
+serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, `contracts/v1/`.
 
 > This file is **Dev B's**; Dev A's rows are reported by me, never inferred from the repo.
 > Update protocol is in `CLAUDE.md` — propose a diff, wait for confirmation, never write unasked.
@@ -24,11 +18,23 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Commit the UI redesign and verify the backtest screen against a live stack** — Dev B · **next**
-- Redesign is complete in the working tree (all three screens); tsc and build pass. The backtest
-  results view has only been checked with mocked responses, because Docker was down.
-- `tests/integration/test_critical_path.py` exists without its `conftest.py` — 7.3 is `wip`.
+**Open the 7.3 PR, then click through the backtest screen** — Dev B · **next**
+
+- **`task/7.3-integration-tests` (`18e63db`) is one ahead and unpushed.** `gh` is not installed
+  here, so the PR is yours. `18e63db` had been committed to `main` by mistake; corrected
+  2026-09-10 — the branch now carries it and `main` is back level with `origin/main`.
+- **A second session is working in this checkout** — a locked worktree at
+  `.claude/worktrees/docs-stitch-spec` (branch `worktree-docs-stitch-spec`, `STITCH_BRIEF.md`).
+  Do not rewrite shared history without checking with it first.
+- **`f3e5f50` on the already-merged `task/7.2-backtest-screen` deletes the whole backtester** —
+  712 lines: `bars.py`, `manifest.py`, `runner.py`, `test_runner.py`. `main` is intact. Do not
+  merge that branch again; decide whether to keep or delete it.
+- **7.2's criterion 1 is still half verified.** Run `cd web && npm run dev`, sign in, open
+  `/backtest` against the live market. The stack is up and trading.
+
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
+- **A restarted matcher is silent for 85–110 s** while it replays (measured twice: 1.63 M
+  records in 85.7 s and 109.9 s). Look for `replayed N inbound records` before calling it dead.
 - **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
   `docker compose down -v`.
 
@@ -36,9 +42,8 @@ serves ten symbols on one `config_hash`.
 
 ## Then next
 
-1. **7.3** Integration tests, T5 thinned (Dev B, wk 7) — no `tests/integration/` exists yet
-2. **7.5** Definition-of-done walk (joint) — blocked on Dev A's 7.4, `A:unknown` since 05 Sep
-3. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
+1. **7.5** Definition-of-done walk (joint) — blocked on Dev A's 7.4, `A:unknown` since 05 Sep
+2. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
    terminator, neither of which is mine to choose. See Blocked.
 
 ## Blocked / waiting
@@ -89,7 +94,7 @@ serves ten symbols on one `config_hash`.
 | 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
 | 7.1  Backtester | B | 7 | done | `fbf81ce` · 43 tests, all in the per-commit suite (+0.67s) · **5 of 5 criteria** · `test_two_runs_of_one_manifest_are_byte_identical`, `test_the_strategy_is_handed_one_bar_at_a_time_and_never_a_series`, `test_every_fill_pays_the_takers_fee_from_the_ledger_not_a_local_copy` |
 | 7.2  Backtest screen | B | 7 | done | `3941931` · 27 tests (16 gateway, 11 web) · criterion 2 by test; criterion 1's server half verified live, browser half not — see Deviations · `tests/web/` + `tests/backtest/` 129 pass on `6485c50` · includes the `/backtests` endpoint, Dev B's by the 2026-09-09 decision |
-| 7.3  Integration tests (T5, thinned) | B | 7 | todo | — |
+| 7.3  Integration tests (T5, thinned) | B | 7 | done | `18e63db` · `tests/integration/`, 4 tests · **2 of 2 criteria** · criterion 2 demonstrated by breaking the stack: `stop ledger` names the ledger, `stop matcher` names the matcher |
 | 7.5  Definition-of-done walk | AB | 7 | todo | — |
 
 **Vocabulary.**
@@ -112,21 +117,10 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 
 | Date | Decision | Why | Amends |
 |---|---|---|---|
+| 2026-09-10 | T5's diagnostic measures progress by **stream id, never by `XLEN`** | `streams.maxlen` is 2,000,000 with `MAXLEN ~` trimming, so on a day-old stack the length has plateaued and two readings can be equal while records pour through. Stream ids are monotonic and never reused (OI 003) | applies OI 003 |
+| 2026-09-10 | T5 asks whether **our anchor** is on the outbound stream, not whether the stream moved | The market makers trade continuously, so outbound always advances; reading that as "the matcher is fine" blames the ledger for a matcher that has not reached us yet. One anchor per inbound record is `runner.py`'s own definition, reused rather than restated | — |
+| 2026-09-10 | The anchor scan origin is sampled **before the request**, never after | The matcher answers in single-digit milliseconds, so an origin taken at the start of the wait begins after the anchor was written — the anchor is not found and the matcher is blamed for work it had done | — |
 | 2026-09-10 | The anchor defect is **dormant, not live**; nothing is owed before 7.3 | `ConfigureReplay` (type 5) is forwarded by `adapter.py:_forward` as one `ReplayConfigured`, and `ReplayConfigured` is in `runner.py:is_anchor` — Amendment 2 closed its own candidate as it landed. Inbound types 1–5 each produce exactly one anchor, so no zero-anchor type exists at `schema_version` 2 | re-checks the 2026-09-09 entry |
-| 2026-09-08 | **The grant is 10,000,000,000 ticks**, was 1,000,000 | Task 5.1 raised prices to 8,208,718 ticks and left the week-1 grant behind: it could not buy one unit of six of the ten symbols, and every market maker reported `two_sided_uptime: 0.0` with `INSUFFICIENT_CASH` on every bid — one-sided books, the exact failure OI 005 §5e says a DMM prevents. Sized at 12 full quotes of the dataset's peak | resizes the 2026-08-31 grant |
-| 2026-09-08 | A bar channel is named in **simulated** time: the 1-second bucket is `1m`, the 60-second bucket `1h` | `_WIDTH_SUFFIX` labelled by literal seconds, so `bars:*:1m` carried 60-second buckets — one candle per *real* minute, the compression the 2026-09-06 decision was written to prevent. `width_label` now divides by the ratio | implements the 2026-09-06 decision |
-| 2026-09-08 | The idempotency **in-flight sentinel** expires in 30 s; only a recorded outcome keeps the hour | One key served two lifetimes. A gateway dying between claim and record left `in_progress` with no outcome, so every retry got `202 in_progress` for a full hour — an order neither placed nor refused | — |
-| 2026-09-08 | `MarketBuffer` keys bar series by **symbol and width** | The router discarded the width, so two widths would fold into one array and the chart would draw two timeframes as one line. Latent at one width; wrong at two, which 7.1 will need | — |
-| 2026-09-08 | The client **resyncs on every connect**, not once per session | `StreamClient` resets its tracker on open, which is an admission that anything missed while disconnected is unrecoverable — so a connect *is* a gap. Found in the browser: signing in after the socket started left cash on "awaiting the grant…" forever | implements OI 014 §14e |
-| 2026-09-08 | The client mirrors the ledger's maker/taker fees, guarded by a test that reads both | The private stream carries no balance — no record can, the engine is money-blind — so cash cannot move on a fill without it. §3.4 puts `role` on the wire for exactly this | one deliberate duplication |
-| 2026-09-08 | `LiveQuote.tsx` deleted | Unused, ran its own frame loop against the one-loop decision, and rendered raw ticks with no tick size — the template a future session would have copied | — |
-| 2026-09-08 | The archiver's checkpoint is a **low-water mark** — the stream id of the oldest record not yet written to a file — not the last record applied | Every file on disk is then complete for everything strictly before it, and nothing after it has been written, so a restart re-derives the in-flight buckets and writes each file exactly once. 6.2's third criterion ("neither a gap nor a duplicate") needs no overwrite semantics and no dedup pass | implements 6.2 criterion 3 |
-| 2026-09-08 | The archiver **imports** `services/fanout/` bars, book and state rather than moving them to a shared package | 6.2's Boundaries say bar aggregation is built once; a move would edit a finished, tested process for cosmetics. Revisit if a third consumer needs them | implements 6.2's Boundaries |
-| 2026-09-08 | Archived 1 Hz L2 snapshots are cut on **`timestamp_ns`**, like bars — the snapshot for stream-second N is written when the first record of N+1 arrives | A wall-clock sampler would put a different number of snapshots in a replay than in the live run, making the archive unreproducible. `timestamp_ns` is real gateway time, so 1 Hz on stream time is the 1 Hz behind the ~345 MB/day estimate | implements OI 011 §11b |
-| 2026-09-08 | A **sealed flush unit is never reopened**; rows arriving for one are counted as `late_rows` and dropped | A backwards-stamped record reopened its old unit and built a second, partial one — which the writer would then write to the same deterministic path, replacing a complete file with an incomplete one. Filing it into whichever unit is open instead would put a trade under the wrong minute, which is a wrong archive nothing would report | found by `test_a_row_for_a_written_unit_is_counted_not_misfiled` |
-| 2026-09-08 | The checkpoint is **exclusive** — the ID before the oldest open unit's first record, not that record | `read_records(last_id=X)` returns records strictly after X, so a checkpoint naming a record still to be re-read skips exactly that record on every restart. One lost trade per restart, in a file nobody would check | `Unit.resume_after` |
-| 2026-09-08 | The image creates `/archive` owned by `quant`, and the archiver's healthcheck asserts **writability**, not just a Redis ping | The container ran non-root against a root-owned volume, failed every `mkdir` and reported healthy while writing nothing. Third instance of healthy-but-idle in this project, after fan-out not running and the matcher dead | `Dockerfile`, `docker-compose.yml` |
-| 2026-09-08 | The archive root is `QA_ARCHIVE_DIR`, a named volume — **infrastructure, not configuration** | A path differs between laptop, CI and container while the configuration is identical; inside `config_hash` it would change the hash when nothing about the configuration had | applies the 2026-08-31 split |
 | 2026-09-09 | A bot meeting a **401 logs in again and re-sends the same request once** | Sessions expire on an absolute TTL, so a bot quoting every second still dies at hour twelve. The resend is a retry and not a duplicate because a 401 comes from the `CurrentUser` dependency, which resolves *before* the rate limiter and before `idempotency.claim` — nothing was recorded against that `client_order_id` | implements OI 008's retry protocol at a new door |
 | 2026-09-09 | **The gateway session TTL stays absolute** — renewal on use was rejected | Renewing on read is the other possible fix, and it is a change to auth semantics settled in OI 015: a browser session that never expires while a tab is open is a different decision from a bot that reconnects. The client is the layer that knows it is a bot | declines to amend OI 015 |
 | 2026-09-09 | **The `/backtests` gateway endpoint is Dev B's**, inside 7.2 | 7.2's tech stack lists only TypeScript and React, yet its first criterion is "a user runs a backtest from the interface", which needs a server route. `vite.config.ts` has proxied `/backtests` since 5.4a. Unowned work in week 7 is work that does not happen | closes a gap between 7.1's and 7.2's deliverables |
@@ -149,6 +143,19 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 Task moved weeks · scope cut · criterion waived — with the reason. A schedule deviation is not
 a design change.
 
+- **`18e63db` was committed to `main`, not to a task branch.** The checkout moved from
+  `task/7.3-integration-tests` back to `main` between the branch being created and the commit
+  being made (reflog `HEAD@{4}`), and the branch was not re-checked before committing. Corrected
+  2026-09-10, nothing lost. Recorded because the PR-only rule is what it broke.
+- **`.claude/worktrees/` is untracked and not ignored.** `.gitignore` covers only
+  `.claude/settings.local.json`, so a full nested worktree sits in the repo as untracked.
+  `f3e5f50` adds the `.claude/` line, but that commit is stranded on a merged branch.
+- **7.3's liquidity precondition is a loud skip, not a guarantee.** The fill half of the
+  critical path needs a counterparty, and the only source is the bots profile. The test probes
+  with a market order and skips naming the reason if the ask side is empty. It also skips
+  whenever the stack is unreachable — which is every CI run, since `ci.yml` runs
+  `-m "not property"` and provides only Redis and Postgres. **A green CI run has not verified
+  Task 7.3.**
 - **3.1 Criterion 3 is unverified, not passing.** "A cancel that loses the race to a fill
   releases nothing" could not be built reliably against a live matcher. Recorded, not claimed.
 - **3.3 was split.** CI, nightly and multi-arch images merged as `5efe462`; the deployment half
