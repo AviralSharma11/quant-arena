@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ConnectionIndicator } from "./components/ConnectionState";
+import { LogoIcon, UserIcon } from "./components/Icons";
 import { ROUTES } from "./routes";
-import { Auth, type UserSession } from "./screens/Auth";
+import { Auth, SignOutButton, type UserSession } from "./screens/Auth";
 import { Backtest } from "./screens/Backtest";
 import { Placeholder } from "./screens/Placeholder";
 import { Trading } from "./screens/Trading";
@@ -17,23 +18,65 @@ import { startStreamSession, type StreamSession } from "./stream/session";
 import { fetchSymbols, type Symbol } from "./stream/symbols";
 import type { ConnectionState } from "./stream/types";
 
-function Nav({ user, connection }: { user: UserSession | null; connection: ConnectionState }) {
+/**
+ * Where a visitor without a session is sent, and where a session lands. Read from the route table
+ * rather than written out, so the router keeps one source for its paths.
+ */
+const AUTH_PATH = ROUTES.find((route) => route.id === "auth")!.path;
+const HOME_PATH = ROUTES.find((route) => route.id === "trading")!.path;
+
+function AppHeader({
+  user,
+  connection,
+  onSignedOut,
+}: {
+  user: UserSession;
+  connection: ConnectionState;
+  onSignedOut: () => void;
+}) {
   const { pathname } = useLocation();
   return (
-    <nav>
-      {ROUTES.map((route) => (
-        <Link
-          key={route.id}
-          to={route.path}
-          aria-current={pathname === route.path ? "page" : undefined}
-        >
-          {route.id === "auth" && user ? `Sign in (${user.username})` : route.title}
-        </Link>
-      ))}
-      {/* On every screen, always. A trading interface that silently shows stale prices is
-          worse than one that admits it is disconnected (Open Issue 014 §14e). */}
-      <ConnectionIndicator state={connection} />
-    </nav>
+    <header className="app-header">
+      <Link to={HOME_PATH} className="brand" aria-label="Quant Arena, trading screen">
+        <span className="brand-mark">
+          <LogoIcon size={18} />
+        </span>
+        <span className="brand-text">
+          <span className="brand-name">Quant Arena</span>
+          <span className="brand-sub">Simulated exchange terminal</span>
+        </span>
+      </Link>
+
+      {/* The sign-in screen is not offered here. This header only exists for a session, and
+          `/login` sends a signed-in visitor straight back to the terminal. */}
+      <nav className="app-nav" aria-label="Screens">
+        {ROUTES.filter((route) => route.id !== "auth").map((route) => (
+          <Link
+            key={route.id}
+            to={route.path}
+            aria-current={pathname === route.path ? "page" : undefined}
+          >
+            {route.title}
+          </Link>
+        ))}
+      </nav>
+
+      <div className="header-status">
+        {/* On every screen, always. A trading interface that silently shows stale prices is
+            worse than one that admits it is disconnected (Open Issue 014 §14e). */}
+        <ConnectionIndicator state={connection} />
+        <div className="account">
+          <span className="account-text">
+            <span className="account-name">{user.username}</span>
+            <span className="account-id">ID #{user.user_id}</span>
+          </span>
+          <span className="account-avatar" aria-hidden="true">
+            <UserIcon size={16} />
+          </span>
+          <SignOutButton onSignedOut={onSignedOut} />
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -46,6 +89,9 @@ export default function App() {
       return null;
     }
   });
+  /** A confirmation for the sign-in screen to show — "Signed out." — after the header's button
+   *  has sent the visitor there. The screen that did the work is no longer mounted to say so. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Low-frequency chrome, so React state is exactly right for it. The book is not here.
   const [connection, setConnection] = useState<ConnectionState>("closed");
@@ -171,7 +217,8 @@ export default function App() {
         if (res.ok) {
           return res.json();
         } else if (res.status === 401) {
-          // Session was revoked in Redis or expired
+          // Session was revoked in Redis or expired. Clearing the user is also what sends the
+          // visitor to the sign-in screen: every other route redirects without one.
           setUser(null);
           localStorage.removeItem("qa_user");
         }
@@ -193,6 +240,7 @@ export default function App() {
   }, []);
 
   function handleLogin(session: UserSession) {
+    setNotice(null);
     setUser(session);
     try {
       localStorage.setItem("qa_user", JSON.stringify(session));
@@ -203,6 +251,7 @@ export default function App() {
 
   function handleLogout() {
     setUser(null);
+    setNotice("Signed out.");
     try {
       localStorage.removeItem("qa_user");
     } catch {
@@ -212,8 +261,8 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Nav user={user} connection={connection} />
-      <main>
+      {user && <AppHeader user={user} connection={connection} onSignedOut={handleLogout} />}
+      <main className={user ? "app-main" : "app-main app-main-bare"}>
         <Routes>
           {ROUTES.map((route) => (
             <Route
@@ -221,15 +270,28 @@ export default function App() {
               path={route.path}
               element={
                 route.id === "auth" ? (
-                  <Auth user={user} onLogin={handleLogin} onLogout={handleLogout} />
+                  // A session never sees the sign-in form; signing in lands here and is sent on.
+                  user ? (
+                    <Navigate to={HOME_PATH} replace />
+                  ) : (
+                    <Auth
+                      onLogin={handleLogin}
+                      notice={notice}
+                      connection={connection}
+                      symbolCount={symbols.length}
+                    />
+                  )
+                ) : user === null ? (
+                  // Sign in first. `/stream` is authenticated by the session cookie (§3), so
+                  // without one the book, tape and chart could only ever be empty.
+                  <Navigate to={AUTH_PATH} replace />
                 ) : route.id === "backtest" ? (
-                  <Backtest symbols={symbols} signedIn={user !== null} />
+                  <Backtest symbols={symbols} />
                 ) : route.id === "trading" ? (
                   <Trading
                     buffer={stream?.buffer ?? null}
                     symbols={symbols}
                     portfolio={portfolio}
-                    signedIn={user !== null}
                   />
                 ) : (
                   <Placeholder route={route} />
@@ -242,7 +304,14 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      {user && (
+        <footer className="app-footer">
+          <span>Simulated exchange · no real money</span>
+          <span>
+            {symbols.length > 0 ? `${symbols.length} instruments listed` : "No symbols listed"}
+          </span>
+        </footer>
+      )}
     </BrowserRouter>
   );
 }
-

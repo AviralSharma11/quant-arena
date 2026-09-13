@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-10 · **HEAD** `6485c50` (branch `task/7.2-backtest-screen`, unpushed;
-`main` is `e1bd874`) · **Week 7**
+**Last updated:** 2026-09-13 · **HEAD** `8765203` (branch `task/ui-redesign`, uncommitted work;
+PRs #21 and #22 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are done.** The backtester runs
 and the third screen exists, so **all three screens are built**. On QAA the strategy loses 0.72% against the market's 0.87%, with fees
 alone costing 0.82% of the account — the comparison earning its place.
@@ -24,17 +24,10 @@ serves ten symbols on one `config_hash`.
 
 ## NOW
 
-**Open the two PRs in order, then click through the backtest screen** — Dev B · **next**
-
-- **The stack is fixed and unpushed.** `gh` is not installed here, so the PRs are yours.
-  `main` ← `task/7.1-backtester` first, then `task/7.1-backtester` ← `task/7.2-backtest-screen`,
-  or 7.2's diff will look as though it contains 7.1.
-- **7.2's criterion 1 is half verified.** The server round trip is proven live — the running
-  gateway answers `POST /backtests` with 401 where a bogus path gives 404, so the route is
-  deployed. That a human can click the button and read the table is not. Run
-  `cd web && npm run dev`, sign in, open `/backtest` against the live market.
-- **Then 7.3**, integration tests, T5 thinned. The anchor re-check is **done** — it is dormant,
-  not blocking. Ask before starting.
+**Commit the UI redesign and verify the backtest screen against a live stack** — Dev B · **next**
+- Redesign is complete in the working tree (all three screens); tsc and build pass. The backtest
+  results view has only been checked with mocked responses, because Docker was down.
+- `tests/integration/test_critical_path.py` exists without its `conftest.py` — 7.3 is `wip`.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
 - **`schema_version` is 2.** A stack carrying pre-Amendment-2 records needs one
   `docker compose down -v`.
@@ -63,6 +56,13 @@ serves ten symbols on one `config_hash`.
   activates a second defect (`step()` respawns a dead engine with an empty book and `order_id`
   back to 1, colliding across all three consumers), so it is written up rather than patched.
 - **On a decision from me:** nothing. **External:** nothing outstanding.
+- **Balances do not survive a restart once the stream has been trimmed — needs a decision, you
+  and Dev A.** Cash grants are `CreateAccount` events on the inbound stream, trimmed at
+  `maxlen = 2000000` (`config/quant_arena.toml:134`). With no snapshots in Phase 1, a restart
+  replays only the retained window: fills without their grants. Observed 2026-09-13: 30 accounts
+  rebuilt at or below zero (`dmm_qaa` −2,716,652,209 ticks), bots crash-looping on
+  `dmm_qaa was never funded`. Cleared by `docker compose down -v`, which deletes every account.
+  It recurs after the next ~2M records. Snapshots are Phase 2, so the answer is a decision, not a patch.
 - **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
   for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
   Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.

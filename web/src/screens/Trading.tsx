@@ -1,20 +1,18 @@
 /**
- * The trading screen — Task 6.1a, the market half.
+ * The trading screen — Task 6.1.
  *
  * `WEEKLY_PLAN.md` is blunt about what this is: **"This screen is the demonstration"**. Beats 1
  * to 4 of the five-minute walkthrough happen here, and it is the only place "real-time" is
  * actually experienced — everything upstream exists to make it feel immediate.
  *
- * ## What is here, and what is 6.1b's
+ * ## Two halves, one screen
  *
- * 6.1a is **read-only**: the book, the tape and the chart, one symbol at a time, all painted
- * from the mutable buffer on the frame loop. 6.1b adds the order ticket, open orders with
- * cancellation, and portfolio — which are driven by the private stream.
+ * The market half — symbol strip, chart, book, tape — is high-frequency, droppable, and kept out
+ * of React entirely: each panel is rendered once and then painted through refs. The private half
+ * — ticket, open orders, portfolio — is low-frequency, never dropped, and React state is exactly
+ * right for it. The rule in `buffer.ts` is about *frequency*, not about principle.
  *
- * The seam is not arbitrary. This half is market data: high-frequency, droppable, and kept out
- * of React entirely. The other half is private data: low-frequency, never dropped, and React
- * state is exactly right for it. The rule in `buffer.ts` is about *frequency*, not about
- * principle, and 6.1b will say so where it puts a fill into `useState`.
+ * Only a signed-in visitor reaches this screen; `App` sends everyone else to sign in.
  *
  * ## One frame loop, not three
  *
@@ -32,24 +30,22 @@ import { Chart } from "../components/Chart";
 import { OpenOrders, OrderTicket } from "../components/OrderTicket";
 import { PortfolioPanel } from "../components/PortfolioPanel";
 import { TapePanel } from "../components/TapePanel";
+import { formatTicksGrouped } from "../format";
 import type { MarketBuffer } from "../stream/buffer";
 import { startFrameLoop } from "../stream/frameLoop";
 import { openOrderList, type PortfolioState } from "../stream/portfolio";
-import { formatTicks, type Symbol } from "../stream/symbols";
+import type { Symbol } from "../stream/symbols";
 
 export interface TradingProps {
   buffer: MarketBuffer | null;
   symbols: readonly Symbol[];
   /** Cash, positions and open orders, folded from the private stream by `App`. */
   portfolio: PortfolioState;
-  /** The private half is meaningless without a session — there is no private stream to drive
-   *  it, and an empty ticket over a live book would look broken rather than signed out. */
-  signedIn: boolean;
 }
 
 type PaintRegistry = Map<string, Set<() => void>>;
 
-export function Trading({ buffer, symbols, portfolio, signedIn }: TradingProps) {
+export function Trading({ buffer, symbols, portfolio }: TradingProps) {
   // The selected symbol IS React state — it changes when a human clicks, which is about as
   // low-frequency as an event gets. The prices behind it are not.
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -118,8 +114,8 @@ export function Trading({ buffer, symbols, portfolio, signedIn }: TradingProps) 
 
   if (buffer === null || selected === undefined) {
     return (
-      <section className="trading">
-        <h2>Trading</h2>
+      <section className="panel trading-pending" aria-label="Trading">
+        <h2 className="panel-title">Trading</h2>
         <p className="pending">
           {buffer === null
             ? "Connecting to the market data stream…"
@@ -130,53 +126,40 @@ export function Trading({ buffer, symbols, portfolio, signedIn }: TradingProps) 
   }
 
   return (
-    <section className="trading">
-      <header className="trading-header">
-        <h2>Trading</h2>
-        <SymbolTabs
-          symbols={symbols}
-          selected={selected}
-          buffer={buffer}
-          onSelect={setSelectedName}
-          register={register}
-        />
-      </header>
+    <section className="trading" aria-label="Trading">
+      <SymbolStrip
+        symbols={symbols}
+        selected={selected}
+        buffer={buffer}
+        onSelect={setSelectedName}
+        register={register}
+      />
 
       <div className="trading-grid">
-        <Chart key={`chart-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
-        <BookPanel key={`book-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
-        <TapePanel key={`tape-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
-
-        {/* The private half (6.1b). These three are React state and re-render on a fill; the
-            three above are painted through refs on the frame loop and never re-render at all.
-            Both halves share one screen and one frame loop, and nothing below this line
-            subscribes to the buffer — `topOfBook` reads it once, when a human clicks. */}
-        {signedIn ? (
-          <>
-            <OrderTicket
-              symbol={selected}
-              topOfBook={topOfBook}
-              notices={portfolio.notices}
-              symbolsByName={symbolsByName}
-            />
+        <div className="col-main">
+          <Chart key={`chart-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
+          {/* The private half (6.1b). These re-render on a fill; the market panels are painted
+              through refs and never re-render at all. Nothing in the private half subscribes
+              to the buffer — `topOfBook` reads it once, when a human clicks. */}
+          <div className="private-row">
             <OpenOrders orders={openOrders} symbolsByName={symbolsByName} />
-            <PortfolioPanel
-              state={portfolio}
-              symbolsByName={symbolsByName}
-              cashSymbol={selected}
-            />
-          </>
-        ) : (
-          <section className="signed-out" aria-label="Sign in to trade">
-            <h3>Trading</h3>
-            <p className="pending">
-              Sign in to trade &mdash; and to see the market at all. `/stream` is authenticated
-              by the session cookie (&sect;3), so the book, tape and chart above stay empty and
-              the indicator reads &ldquo;Reconnecting&rdquo; until there is a session: fan-out
-              accepts the socket, answers <code>unauthenticated</code>, and closes it.
-            </p>
-          </section>
-        )}
+            <PortfolioPanel state={portfolio} symbolsByName={symbolsByName} cashSymbol={selected} />
+          </div>
+        </div>
+
+        <div className="col-book">
+          <BookPanel key={`book-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
+          <TapePanel key={`tape-${selected.name}`} symbol={selected} buffer={buffer} register={register} />
+        </div>
+
+        <div className="col-ticket">
+          <OrderTicket
+            symbol={selected}
+            topOfBook={topOfBook}
+            notices={portfolio.notices}
+            symbolsByName={symbolsByName}
+          />
+        </div>
       </div>
     </section>
   );
@@ -190,7 +173,7 @@ export function Trading({ buffer, symbols, portfolio, signedIn }: TradingProps) 
  * deliberate: a demonstration where the nine unselected symbols showed frozen prices would look
  * like nine broken markets.
  */
-function SymbolTabs({
+function SymbolStrip({
   symbols,
   selected,
   buffer,
@@ -204,20 +187,23 @@ function SymbolTabs({
   register: (symbolName: string, paint: () => void) => () => void;
 }) {
   return (
-    <div className="symbol-tabs" role="tablist">
-      {symbols.map((symbol) => (
-        <button
-          key={symbol.name}
-          role="tab"
-          type="button"
-          aria-selected={symbol.name === selected.name}
-          className={symbol.name === selected.name ? "tab selected" : "tab"}
-          onClick={() => onSelect(symbol.name)}
-        >
-          <span className="tab-name">{symbol.name}</span>
-          <TabPrice symbol={symbol} buffer={buffer} register={register} />
-        </button>
-      ))}
+    <div className="panel symbol-strip">
+      <span className="label-caps symbol-strip-label">Instruments</span>
+      <div className="symbol-strip-tabs" role="tablist" aria-label="Instruments" style={{ display: "contents" }}>
+        {symbols.map((symbol) => (
+          <button
+            key={symbol.name}
+            role="tab"
+            type="button"
+            aria-selected={symbol.name === selected.name}
+            className="tab"
+            onClick={() => onSelect(symbol.name)}
+          >
+            <span className="tab-name">{symbol.name}</span>
+            <TabPrice symbol={symbol} buffer={buffer} register={register} />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -241,11 +227,12 @@ function TabPrice({
       // Last traded price, or the mid if nothing has printed yet. A tab reading "—" on a
       // symbol with a live two-sided book would look broken when it is merely quiet.
       if (trade !== undefined) {
-        ref.current.textContent = formatTicks(trade.priceTicks, symbol);
+        ref.current.textContent = formatTicksGrouped(trade.priceTicks, symbol, { currency: true });
       } else if (book?.bids[0] !== undefined && book.asks[0] !== undefined) {
-        ref.current.textContent = formatTicks(
+        ref.current.textContent = formatTicksGrouped(
           Math.round((book.bids[0][0] + book.asks[0][0]) / 2),
           symbol,
+          { currency: true },
         );
       } else {
         ref.current.textContent = "—";
