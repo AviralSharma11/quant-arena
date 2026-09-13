@@ -31,7 +31,10 @@ def test_auth_screen_structure():
     assert 'id="password"' in auth_src
     assert 'type="submit"' in auth_src
     assert 'type="password"' in auth_src
-    assert 'minLength={8}' in auth_src
+    # The eight-character minimum is a registration rule. Signing in checks an existing password,
+    # so the length rule — and its meter — apply only in register mode.
+    assert "const PASSWORD_MIN = 8;" in auth_src
+    assert 'minLength={mode === "register" ? PASSWORD_MIN : undefined}' in auth_src
 
     # Modes and session
     assert 'mode === "login"' in auth_src
