@@ -88,9 +88,10 @@ def test_the_range_is_in_simulated_days_and_not_dates(code: str):
 
 def test_prices_are_formatted_through_the_symbols_tick_size(code: str):
     """The 2026-09-07 decision: `formatTicks` throws without a tick size rather than rendering
-    raw ticks beside a correct price."""
+    raw ticks beside a correct price. The scale is the one the result itself carries, so an
+    amount is never formatted at the scale of a symbol the form has since moved to."""
     assert "formatTicks" in code
-    assert "symbolForResult" in code
+    assert "result.tick_size_ticks" in code
 
 
 def test_the_strategy_list_is_fetched_rather_than_hardcoded(code: str):
