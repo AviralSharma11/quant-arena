@@ -1,10 +1,10 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-10 · **HEAD** `18e63db` (branch `task/7.3-integration-tests`,
-unpushed; `main` is `8765203`, level with `origin/main`) · **Week 7**
+**Last updated:** 2026-09-13 · **HEAD** `4a4f771` (branch `task/ui-redesign`; `origin/main` is
+`a487141`, PR #25 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
-costing 0.82% of the account. **7.3 is built and green** — four integration tests against the
+costing 0.82% of the account. **7.3 is merged** (PR #25) — four integration tests against the
 live stack, both layer-blame branches proven by breaking it on purpose. **804 pass, 7 skipped**,
 none failing. **3.3 is on hold by your decision (2026-09-09)**. **The market is live**, and the
 twelve-hour bot re-auth was observed on 2026-09-09 (see Archive).
@@ -18,11 +18,11 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
-**Open the 7.3 PR, then click through the backtest screen** — Dev B · **next**
+**Open the UI-redesign PR, then click through the backtest screen** — Dev B · **next**
 
-- **`task/7.3-integration-tests` (`18e63db`) is one ahead and unpushed.** `gh` is not installed
-  here, so the PR is yours. `18e63db` had been committed to `main` by mistake; corrected
-  2026-09-10 — the branch now carries it and `main` is back level with `origin/main`.
+- **`task/ui-redesign` is pushed** — the three-screen redesign, plus `4a4f771`, which fixed CI by
+  updating two web tests that asserted removed source text. Open its PR against `main`. `gh` is
+  installed (`~/.local/bin/gh`) but not logged in: `! gh auth login`.
 - **A second session is working in this checkout** — a locked worktree at
   `.claude/worktrees/docs-stitch-spec` (branch `worktree-docs-stitch-spec`, `STITCH_BRIEF.md`).
   Do not rewrite shared history without checking with it first.
@@ -30,8 +30,8 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
   712 lines: `bars.py`, `manifest.py`, `runner.py`, `test_runner.py`. `main` is intact. Do not
   merge that branch again; decide whether to keep or delete it.
 - **7.2's criterion 1 is still half verified.** Run `cd web && npm run dev`, sign in, open
-  `/backtest` against the live market. The stack is up and trading.
-
+  `/backtest` against the live market. The stack is up and trading — wiped 2026-09-13
+  (`docker compose down -v`), so register a fresh account first.
 - **Restart the matcher after any full `pytest` run** until Dev A takes `HANDOFF.md` §3a.
 - **A restarted matcher is silent for 85–110 s** while it replays (measured twice: 1.63 M
   records in 85.7 s and 109.9 s). Look for `replayed N inbound records` before calling it dead.
@@ -73,9 +73,6 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
   Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
 - **On Dev A — 6.3, 6.4 and 7.4 have never been reported**, and 7.4 blocks the joint 7.5. The
   existing ask names only 4.2, 4.3 and 5.3; these three belong in it.
-- **On you, to restart the live market:** `secrets-local.txt` is `deny`-listed in
-  `.claude/settings.local.json` and the denial is enforced above that file, so I cannot read
-  `QA_BOT_PASSWORD` by any route. Every step around it is done; the one command is in NOW.
 
 ---
 
@@ -104,9 +101,7 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 - Dev A rows: `A:todo` · `A:wip` · `A:done` · `A:unknown`, always with `reported YYYY-MM-DD`.
   **Reported by me, never inferred.** Do not read the repo and conclude a Dev A task is finished
   — Dev A may push work in progress, or finish without pushing. `A:unknown` is expected.
-- **At most one row may be `wip`**, and it must match NOW. None is `wip` today: 5.1 is `blocked`
-  on Dev A, not in progress. (The old wording said "exactly one", which the file itself broke on
-  2026-09-07 — 5.1 was `wip` while NOW read 6.1b.)
+- **At most one row may be `wip`**, and it must match NOW. None is `wip` today.
 
 ---
 
