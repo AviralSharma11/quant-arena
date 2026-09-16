@@ -1,6 +1,6 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-16 · **HEAD** `8479f3e` (branch `task/7.5-definition-of-done`;
+**Last updated:** 2026-09-16 · **HEAD** `a4c2769` (branch `task/020-checkpointing`;
 `origin/main` is `1ebab7d`, PR #27 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
@@ -18,6 +18,11 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
+**Merge PR #29, then PR #30** (checkpointing, Open Issue 020) — Dev B · **next**
+- #29: ledger read model froze 4 h behind (full-table rewrite per batch); chart crash on
+  re-delivered bars. Verified in browser. #30: checkpointing, verified by restart-after-trim live.
+- Then pick from `BUGS.md`: BUG-001 cash scale needs a decision; BUG-002/003/004 are small.
+
 **Open the PR for `task/7.5-definition-of-done` to close Phase 1** — Dev B · **next**
 
 - **`task/7.4-benchmark-report` is merged** (`1ebab7d`).
@@ -31,6 +36,8 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 - **The benchmark runs left resting probe orders in every symbol's book.** One tick, never trade,
   excluded from measurement by price. Harmless to prices; a future measurement that forgets them
   will misread the book. Cleared only by `docker compose down -v`.
+- **Wrong in this file:** NOW said the benchmark probe orders were harmless. There were ~228k of
+  them, they froze the ledger, and they were cleared by `docker compose down -v` on 2026-09-16.
 - **`f3e5f50` on the already-merged `task/7.2-backtest-screen` deletes the whole backtester** —
   712 lines: `bars.py`, `manifest.py`, `runner.py`, `test_runner.py`. `main` is intact. Do not
   merge that branch again; decide whether to keep or delete it.
@@ -125,6 +132,7 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 
 | Date | Decision | Why | Amends |
 |---|---|---|---|
+| 2026-09-16 | **Checkpointing moved into Phase 1 (020), reversing 018 §13.1–13.2**; Dev B took over the engine/matcher work it needs | — | `CLAUDE.md` amended |
 | 2026-09-16 | **Dev B takes over 7.5** | Executed solo per explicit user direction to close Phase 1 deliverables | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
 | 2026-09-16 | **Dev B takes over 7.4** | Dev A's 7.4 was `A:unknown` since 05 Sep and blocked the joint 7.5. Your call, made explicitly rather than drifted into | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
 | 2026-09-16 | **Private frames are handed to the writer when offered, not on the conflation tick** | OI 006 exempts private data from conflation; the implementation honoured that as "never dropped" while still making it wait a uniform 0–50 ms for a tick. Measured: ptail p50 ~32 ms → ~3.4 ms, 5.2's criteria 1 and 5 re-verified | implements OI 006 as written |
