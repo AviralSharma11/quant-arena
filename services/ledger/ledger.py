@@ -77,6 +77,19 @@ class Ledger:
         self.total_deposits_ticks: int = 0
         self.last_seq: str = "0-0"
         self.events_processed: int = 0
+        # What `apply` touched since the consumer last took them. The read model is written
+        # incrementally from these: rewriting every row after every batch was a full copy of
+        # the open-order table per hundred records, and with a quarter of a million orders
+        # resting the ledger fell hours behind the stream it projects.
+        self.dirty_accounts: set[int] = set()
+        self.dirty_positions: set[tuple[int, int]] = set()
+        self.dirty_orders: set[int] = set()
+
+    def take_dirty(self) -> tuple[set[int], set[tuple[int, int]], set[int]]:
+        """Hand over and clear the keys changed since the previous call."""
+        dirty = (self.dirty_accounts, self.dirty_positions, self.dirty_orders)
+        self.dirty_accounts, self.dirty_positions, self.dirty_orders = set(), set(), set()
+        return dirty
 
     def reset(self) -> None:
         self.cash_balances.clear()
@@ -86,6 +99,7 @@ class Ledger:
         self.total_deposits_ticks = 0
         self.last_seq = "0-0"
         self.events_processed = 0
+        self.take_dirty()
 
     def apply(self, record: Any, stream_id: str | None = None) -> None:
         """Apply an event record to update balances, positions, or orders."""
@@ -95,14 +109,17 @@ class Ledger:
 
         if isinstance(record, AccountCreated):
             self.cash_balances[record.user_id] = record.initial_cash_ticks
+            self.dirty_accounts.add(record.user_id)
             self.total_deposits_ticks += record.initial_cash_ticks
 
         elif isinstance(record, CashCredited):
             current = self.cash_balances.get(record.user_id, 0)
             self.cash_balances[record.user_id] = current + record.amount_ticks
+            self.dirty_accounts.add(record.user_id)
             self.total_deposits_ticks += record.amount_ticks
 
         elif isinstance(record, OrderAccepted):
+            self.dirty_orders.add(record.order_id)
             self.open_orders[record.order_id] = OpenOrderRecord(
                 order_id=record.order_id,
                 client_order_id=record.client_order_id,
@@ -117,6 +134,7 @@ class Ledger:
             )
 
         elif isinstance(record, OrderCancelled):
+            self.dirty_orders.add(record.order_id)
             if record.order_id in self.open_orders:
                 order = self.open_orders[record.order_id]
                 order.remaining_qty -= record.remaining_qty
@@ -145,11 +163,15 @@ class Ledger:
             self.cash_balances[buyer_id] = self.cash_balances.get(buyer_id, 0) + buyer_cash_delta
             self.cash_balances[seller_id] = self.cash_balances.get(seller_id, 0) + seller_cash_delta
 
+            self.dirty_accounts.update((buyer_id, seller_id))
+            self.dirty_orders.update((record.maker_order_id, record.taker_order_id))
+
             # Apply position changes
             buyer_key = (buyer_id, record.symbol_id)
             seller_key = (seller_id, record.symbol_id)
             self.positions[buyer_key] = self.positions.get(buyer_key, 0) + record.qty
             self.positions[seller_key] = self.positions.get(seller_key, 0) - record.qty
+            self.dirty_positions.update((buyer_key, seller_key))
 
             # Update resting maker order quantity
             if record.maker_order_id in self.open_orders:
