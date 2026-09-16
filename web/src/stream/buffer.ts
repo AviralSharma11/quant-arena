@@ -152,13 +152,25 @@ export class MarketBuffer {
       series = [];
       this.bars.set(key, series);
     }
+    // Kept strictly ascending by `bar_open_ns`, because Lightweight Charts' `setData` throws on
+    // a repeated or out-of-order time and takes the whole chart down with it. The common case is
+    // a newer bar, appended; an older one — re-delivered after a reconnect — is placed by binary
+    // search, replacing its twin if the series already holds that candle.
     const last = series[series.length - 1];
-    if (last !== undefined && last.barOpenNs === bar.barOpenNs) {
-      series[series.length - 1] = bar;
-    } else {
+    if (last === undefined || bar.barOpenNs > last.barOpenNs) {
       series.push(bar);
-      if (series.length > BAR_LIMIT) series.splice(0, series.length - BAR_LIMIT);
+    } else {
+      let lo = 0;
+      let hi = series.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (series[mid].barOpenNs < bar.barOpenNs) lo = mid + 1;
+        else hi = mid;
+      }
+      if (series[lo]?.barOpenNs === bar.barOpenNs) series[lo] = bar;
+      else series.splice(lo, 0, bar);
     }
+    if (series.length > BAR_LIMIT) series.splice(0, series.length - BAR_LIMIT);
     this.changed.add(symbol);
     this.writes += 1;
   }

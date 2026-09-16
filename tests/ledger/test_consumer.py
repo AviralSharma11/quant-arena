@@ -15,6 +15,8 @@ import pytest
 
 from contracts.v1.generated.contracts import (
     AccountCreated,
+    CancelReason,
+    OrderCancelled,
     CashCredited,
     Fill,
     OrderAccepted,
@@ -152,3 +154,47 @@ async def test_live_tailing_updates_ledger_and_database():
         assert consumer.ledger.get_balance(99) == 500_000
     finally:
         await consumer.stop()
+
+
+async def test_live_flush_writes_only_what_the_batch_touched():
+    """Regression: a live flush rewrote every open order after every batch, so with a large
+    resting book the ledger fell hours behind and new accounts never reached PostgreSQL."""
+    mock_db = MockAsyncDbEngine()
+    mock_redis = MockRedisStream()
+    stream_name = "qa.outbound"
+
+    resting = [
+        OrderAccepted.new(
+            timestamp_ns=i, order_id=1_000 + i, client_order_id=i, user_id=1, symbol_id=1,
+            side=Side.BUY, price_ticks=1, qty=1, tif=Tif.GTC,
+        )
+        for i in range(500)
+    ]
+    for e in resting:
+        await mock_redis.xadd(stream_name, {b"r": e.pack()})
+
+    consumer = LedgerConsumer(mock_redis, mock_db, stream_name, batch_size=1_000, poll_block_ms=10)
+    await consumer.replay_from_genesis()
+    mock_db.conn.executed.clear()
+
+    consumer.start()
+    try:
+        await mock_redis.xadd(
+            stream_name,
+            {b"r": AccountCreated.new(timestamp_ns=9_999, client_order_id=1, user_id=80, initial_cash_ticks=500).pack()},
+        )
+        await mock_redis.xadd(stream_name, {b"r": OrderCancelled.new(
+            timestamp_ns=10_000, order_id=1_000, client_order_id=0, user_id=1, remaining_qty=1, symbol_id=1,
+            reason=CancelReason.USER_REQUESTED,
+        ).pack()})
+        await asyncio.sleep(0.05)
+    finally:
+        await consumer.stop()
+
+    statements = mock_db.conn.executed
+    account_rows = [p for s, p in statements if "INSERT INTO accounts" in s]
+    assert account_rows == [[{"user_id": 80, "cash_ticks": 500, "now_ns": account_rows[0][0]["now_ns"]}]]
+    # The 499 orders nothing touched are neither deleted nor rewritten.
+    assert not any(s.strip() == "DELETE FROM open_orders" for s, _ in statements)
+    assert not any("INSERT INTO open_orders" in s for s, _ in statements)
+    assert [p for s, p in statements if "DELETE FROM open_orders WHERE" in s] == [[{"order_id": 1_000}]]

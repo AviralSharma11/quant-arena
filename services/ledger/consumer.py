@@ -13,6 +13,7 @@ Full replay recovery on startup (Success Criterion 3):
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -22,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from services.gateway.streams import read_records
 from services.ledger.ledger import Ledger
+
+logger = logging.getLogger(__name__)
 
 
 class LedgerConsumer:
@@ -45,6 +48,7 @@ class LedgerConsumer:
         self.poll_block_ms = poll_block_ms
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
+        self._needs_full_flush = False
 
     async def replay_from_genesis(self) -> int:
         """Rebuild entire state by replaying the retained stream from 0-0."""
@@ -67,50 +71,100 @@ class LedgerConsumer:
                 last_id = item.stream_id
                 replayed_count += 1
 
-        await self.flush_to_db()
+        await self.flush_to_db(full=True)
         return replayed_count
 
-    async def flush_to_db(self) -> None:
-        """Bulk write the current in-memory ledger state into PostgreSQL without ORM overhead."""
+    async def flush_to_db(self, *, full: bool = False) -> None:
+        """Write the in-memory ledger into PostgreSQL.
+
+        `full` rewrites every table, and is only for the end of a replay, when the database may
+        hold anything. Every other flush writes only the rows `Ledger.apply` touched since the
+        previous one. Rewriting everything after every batch copied the whole open-order table
+        per hundred records; with ~230,000 orders resting that took longer than the stream took
+        to produce the next batch, and the read model froze hours behind — new accounts had no
+        row, so `GET /portfolio` reported no cash and no positions.
+
+        Each statement goes out once with a list of parameters, which SQLAlchemy sends as an
+        executemany rather than a round trip per row.
+        """
         now_ns = time.time_ns()
+        ledger = self.ledger
+        dirty_accounts, dirty_positions, dirty_orders = ledger.take_dirty()
+        if full:
+            dirty_accounts = set(ledger.cash_balances)
+            dirty_positions = set(ledger.positions)
+            dirty_orders = set(ledger.open_orders)
+
         async with self.db.begin() as conn:
-            # 1. Update Accounts (User cash balances)
-            for user_id, cash_ticks in self.ledger.cash_balances.items():
+            if dirty_accounts:
                 await conn.execute(
                     text(
                         """
                         INSERT INTO accounts (user_id, cash_ticks, created_at_ns)
                         VALUES (:user_id, :cash_ticks, :now_ns)
                         ON CONFLICT (user_id) DO UPDATE
-                        SET cash_ticks = :cash_ticks
+                        SET cash_ticks = EXCLUDED.cash_ticks
                         """
                     ),
-                    {"user_id": user_id, "cash_ticks": cash_ticks, "now_ns": now_ns},
+                    [
+                        {"user_id": user_id, "cash_ticks": ledger.cash_balances[user_id], "now_ns": now_ns}
+                        for user_id in sorted(dirty_accounts)
+                    ],
                 )
 
-            # 2. Update Positions
-            # Clear existing derived positions and rewrite active non-zero positions
-            await conn.execute(text("DELETE FROM positions"))
-            for (user_id, symbol_id), qty in self.ledger.positions.items():
-                if qty != 0:
-                    await conn.execute(
-                        text(
-                            """
-                            INSERT INTO positions (user_id, symbol_id, qty, updated_at_ns)
-                            VALUES (:user_id, :symbol_id, :qty, :now_ns)
-                            """
-                        ),
-                        {
-                            "user_id": user_id,
-                            "symbol_id": symbol_id,
-                            "qty": qty,
-                            "now_ns": now_ns,
-                        },
-                    )
+            # Positions have no unique key on (user_id, symbol_id), so a changed position is
+            # deleted and re-inserted rather than upserted. A position back at zero is only
+            # deleted: the table holds non-zero holdings.
+            if full:
+                await conn.execute(text("DELETE FROM positions"))
+            elif dirty_positions:
+                await conn.execute(
+                    text("DELETE FROM positions WHERE user_id = :user_id AND symbol_id = :symbol_id"),
+                    [{"user_id": u, "symbol_id": s} for u, s in sorted(dirty_positions)],
+                )
+            position_rows = [
+                {"user_id": u, "symbol_id": s, "qty": ledger.positions[(u, s)], "now_ns": now_ns}
+                for u, s in sorted(dirty_positions)
+                if ledger.positions.get((u, s), 0) != 0
+            ]
+            if position_rows:
+                await conn.execute(
+                    text(
+                        """
+                        INSERT INTO positions (user_id, symbol_id, qty, updated_at_ns)
+                        VALUES (:user_id, :symbol_id, :qty, :now_ns)
+                        """
+                    ),
+                    position_rows,
+                )
 
-            # 3. Update Open Orders
-            await conn.execute(text("DELETE FROM open_orders"))
-            for order in self.ledger.open_orders.values():
+            # An order the ledger still holds is upserted — its remaining quantity may have
+            # moved. One it no longer holds filled or was cancelled, and is deleted.
+            if full:
+                await conn.execute(text("DELETE FROM open_orders"))
+            else:
+                gone = [{"order_id": o} for o in sorted(dirty_orders) if o not in ledger.open_orders]
+                if gone:
+                    await conn.execute(
+                        text("DELETE FROM open_orders WHERE order_id = :order_id"), gone
+                    )
+            order_rows = [
+                {
+                    "order_id": order.order_id,
+                    "client_order_id": order.client_order_id,
+                    "user_id": order.user_id,
+                    "symbol_id": order.symbol_id,
+                    "side": order.side,
+                    "price_ticks": order.price_ticks,
+                    "qty": order.qty,
+                    "remaining_qty": order.remaining_qty,
+                    "tif": order.tif,
+                    "created_at_ns": order.created_at_ns,
+                }
+                for order_id in sorted(dirty_orders)
+                if (order := ledger.open_orders.get(order_id)) is not None
+            ]
+            if order_rows:
                 await conn.execute(
                     text(
                         """
@@ -122,32 +176,23 @@ class LedgerConsumer:
                             :order_id, :client_order_id, :user_id, :symbol_id, :side,
                             :price_ticks, :qty, :remaining_qty, :tif, :created_at_ns
                         )
+                        ON CONFLICT (order_id) DO UPDATE
+                        SET remaining_qty = EXCLUDED.remaining_qty
                         """
                     ),
-                    {
-                        "order_id": order.order_id,
-                        "client_order_id": order.client_order_id,
-                        "user_id": order.user_id,
-                        "symbol_id": order.symbol_id,
-                        "side": order.side,
-                        "price_ticks": order.price_ticks,
-                        "qty": order.qty,
-                        "remaining_qty": order.remaining_qty,
-                        "tif": order.tif,
-                        "created_at_ns": order.created_at_ns,
-                    },
+                    order_rows,
                 )
 
-            # 4. Update House Fee Account
-            await conn.execute(text("DELETE FROM house_fees"))
             await conn.execute(
                 text(
                     """
                     INSERT INTO house_fees (id, fee_ticks, updated_at_ns)
                     VALUES (1, :fee_ticks, :now_ns)
+                    ON CONFLICT (id) DO UPDATE
+                    SET fee_ticks = EXCLUDED.fee_ticks, updated_at_ns = EXCLUDED.updated_at_ns
                     """
                 ),
-                {"fee_ticks": self.ledger.house_fee_ticks, "now_ns": now_ns},
+                {"fee_ticks": ledger.house_fee_ticks, "now_ns": now_ns},
             )
 
     async def run(self) -> None:
@@ -166,12 +211,19 @@ class LedgerConsumer:
                     for item in batch:
                         self.ledger.apply(item.record, stream_id=item.stream_id)
                         last_id = item.stream_id
-                    await self.flush_to_db()
+                    await self.flush_to_db(full=self._needs_full_flush)
+                    self._needs_full_flush = False
                 else:
                     await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break
             except Exception:
+                # Logged, never swallowed: a silent retry here is how the read model sat four
+                # hours stale with nothing in any log to say so. Records already applied are
+                # not re-read — `last_id` moved with each — but the rows they dirtied may not
+                # have reached the database, so the next flush rewrites everything.
+                logger.exception("ledger batch failed at %s; retrying", last_id)
+                self._needs_full_flush = True
                 await asyncio.sleep(0.1)
 
     def start(self) -> None:
