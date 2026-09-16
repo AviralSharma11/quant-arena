@@ -57,7 +57,7 @@ async def feed(settings: Settings, records, redis: Redis | None = None) -> Redis
     """Put records on the inbound stream the way the gateway does — one batching producer."""
     redis = redis or Redis.from_url(settings.redis_url, decode_responses=False)
     producer = StreamProducer(
-        redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=settings.stream_batch_max
+        redis, HaltState(), batch_max=settings.stream_batch_max
     )
     producer.start()
     for record in records:

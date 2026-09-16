@@ -199,7 +199,10 @@ class Settings:
     replay_data_sha256: str
     stream_inbound: str
     stream_outbound: str
-    stream_maxlen: int
+    checkpoint_interval_ms: int
+    checkpoint_trim_interval_ms: int
+    checkpoint_inbound_readers: tuple[str, ...]
+    checkpoint_outbound_readers: tuple[str, ...]
     stream_batch_max: int
     stream_health_poll_ms: int
     symbols: tuple[Symbol, ...]
@@ -250,7 +253,10 @@ class Settings:
             replay_data_sha256=_require(table, "replay", "data_sha256"),
             stream_inbound=_require(table, "streams", "inbound"),
             stream_outbound=_require(table, "streams", "outbound"),
-            stream_maxlen=_require(table, "streams", "maxlen"),
+            checkpoint_interval_ms=_require(table, "checkpoint", "interval_ms"),
+            checkpoint_trim_interval_ms=_require(table, "checkpoint", "trim_interval_ms"),
+            checkpoint_inbound_readers=tuple(_require(table, "checkpoint", "inbound_readers")),
+            checkpoint_outbound_readers=tuple(_require(table, "checkpoint", "outbound_readers")),
             stream_batch_max=_require(table, "streams", "batch_max"),
             stream_health_poll_ms=_require(table, "streams", "health_poll_ms"),
             symbols=_symbols(_require(table, "symbols", "listed")),

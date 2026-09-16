@@ -99,7 +99,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.streams = StreamProducer(
             stream_redis,
             app.state.halt,
-            maxlen=settings.stream_maxlen,
             batch_max=settings.stream_batch_max,
         )
         app.state.streams.start()

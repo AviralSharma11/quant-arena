@@ -9,10 +9,11 @@ All I/O lives here; `NaiveMatcher` is pure. That split is what makes the matcher
 without Redis and, more importantly, what keeps the model deterministic — the runner never
 passes a clock reading or an iteration order into it.
 
-## Recovery is a full replay, and it re-emits nothing
+## Recovery replays from the checkpoint, and it re-emits nothing
 
-There are no snapshots and no checkpoints in Phase 1 (Open Issue 018 §13.1), so a restarted
-matcher rebuilds by replaying the retained stream from `0-0`. The obvious hazard is that a
+A restarted matcher restores its last checkpoint and replays the inbound records after it, or
+replays from `0-0` if it has none (Open Issue 020; `checkpointing.py` has the details and the
+guard that refuses a trimmed stream). The obvious hazard is that a
 naive replay would *re-append* every outbound record it had already written, duplicating fills
 that moved real positions.
 
@@ -36,6 +37,7 @@ answered. Same code path as normal operation, which is the property Task 4.2 wil
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from redis.asyncio import Redis
@@ -50,8 +52,17 @@ from contracts.v1.generated.contracts import (
     OrderCancelled,
     OrderRejected,
 )
+from services import checkpoint
 from services.gateway.streams import HaltState, StreamProducer, read_records
 from services.matcher.adapter import NaiveMatcher
+from services.matcher.checkpointing import (
+    PROCESS,
+    CheckpointSchedule,
+    count_anchors_after,
+    trim_streams,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def is_anchor(record) -> bool:
@@ -86,7 +97,6 @@ class Matcher:
         self.producer = producer or StreamProducer(
             redis,
             self.halt,
-            maxlen=settings.stream_maxlen,
             batch_max=settings.stream_batch_max,
         )
         self._owns_producer = producer is None
@@ -94,7 +104,14 @@ class Matcher:
         self.poll_block_ms = poll_block_ms
         #: Where the inbound tail resumes. Set by `recover()`, advanced by `run()`.
         self.last_inbound_id = "0-0"
+        #: The last outbound id durably appended; the checkpoint's second position.
+        self.last_outbound_id = "0-0"
         self.records_answered = 0
+        self.resumed_from_checkpoint = False
+        self.schedule = CheckpointSchedule(
+            interval_ms=settings.checkpoint_interval_ms,
+            trim_interval_ms=settings.checkpoint_trim_interval_ms,
+        )
         self.last_recovery_seconds: float | None = None
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -104,35 +121,42 @@ class Matcher:
 
     # -- recovery ------------------------------------------------------------------------------
 
-    async def _count_anchors(self) -> int:
-        last_id, anchors = "0-0", 0
-        while True:
-            batch = await self._read(self.settings.stream_outbound, last_id)
-            if not batch:
-                return anchors
-            for item in batch:
-                anchors += is_anchor(item.record)
-                last_id = item.stream_id
-
     async def recover(self) -> int:
-        """Rebuild the book by replaying inbound. Returns the number of records replayed.
+        """Restore the checkpoint, then replay the answered tail. Returns records replayed.
 
         Nothing is appended: the outbound records for these inputs are already on the stream.
+        Raises `CheckpointRefused` rather than replay a trimmed stream partially.
         """
         started = time.perf_counter()
         try:
-            already_answered = await self._count_anchors()
-            self.matcher = self._new_matcher()
-            self.records_answered = 0
-            last_id, replayed = "0-0", 0
+            saved = await checkpoint.resume_positions(
+                self.redis,
+                PROCESS,
+                [self.settings.stream_inbound, self.settings.stream_outbound],
+                config_hash=self.settings.config_hash,
+            )
+            if saved is None:
+                self.matcher = self._new_matcher()
+                inbound_from = outbound_from = "0-0"
+            else:
+                self.matcher = NaiveMatcher.restore(
+                    saved.state, initial_cash_ticks=self.settings.initial_cash_ticks
+                )
+                inbound_from = saved.positions[self.settings.stream_inbound]
+                outbound_from = saved.positions[self.settings.stream_outbound]
+            self.resumed_from_checkpoint = saved is not None
 
+            already_answered, last_outbound = await count_anchors_after(
+                self._read, self.settings.stream_outbound, outbound_from, is_anchor
+            )
+            last_id, replayed = inbound_from, 0
             while replayed < already_answered:
                 batch = await self._read(self.settings.stream_inbound, last_id)
                 if not batch:
-                    # The outbound stream claims more answers than the inbound stream has records.
-                    # Only trimming can do that, and rebuilding past a trim point is not something
-                    # to paper over silently — Phase 1 replays the whole retained stream or fails.
-                    break
+                    raise RuntimeError(
+                        "outbound anchors exceed retained inbound records; "
+                        "cannot recover the matcher safely"
+                    )
                 for item in batch:
                     if replayed >= already_answered:
                         break
@@ -141,10 +165,32 @@ class Matcher:
                     replayed += 1
 
             self.last_inbound_id = last_id
+            self.last_outbound_id = last_outbound
             self.records_answered = replayed
             return replayed
         finally:
             self.last_recovery_seconds = time.perf_counter() - started
+
+    async def write_checkpoint(self) -> None:
+        """Between inbound records only, so both positions describe the same moment."""
+        await checkpoint.save(
+            self.redis,
+            PROCESS,
+            positions={
+                self.settings.stream_inbound: self.last_inbound_id,
+                self.settings.stream_outbound: self.last_outbound_id,
+            },
+            state=self.matcher.snapshot(),
+            config_hash=self.settings.config_hash,
+        )
+        self.schedule.checkpoint_written()
+
+    async def maintain(self) -> None:
+        if self.schedule.checkpoint_due():
+            await self.write_checkpoint()
+        if self.schedule.trim_due():
+            await trim_streams(self.redis, self.settings, self.halt)
+            self.schedule.trimmed()
 
     # -- the live loop -------------------------------------------------------------------------
 
@@ -155,7 +201,9 @@ class Matcher:
         )
         for item in batch:
             for out in self.matcher.apply(item.record):
-                await self.producer.append(self.settings.stream_outbound, out)
+                self.last_outbound_id = await self.producer.append(
+                    self.settings.stream_outbound, out
+                )
             # Advanced only after every outbound record is durable. A crash mid-record replays
             # that record on restart, and the anchor count is what makes that safe.
             self.last_inbound_id = item.stream_id
@@ -165,11 +213,14 @@ class Matcher:
     async def run(self) -> None:
         while not self._stop.is_set():
             try:
-                if not await self.step():
+                handled = await self.step()
+                await self.maintain()
+                if not handled:
                     await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break
             except Exception:  # noqa: BLE001 — a bad record must not kill the exchange
+                logger.exception("matcher step failed at %s; retrying", self.last_inbound_id)
                 await asyncio.sleep(0.1)
 
     def start(self) -> None:
