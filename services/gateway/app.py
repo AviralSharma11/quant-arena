@@ -9,6 +9,7 @@ about a session lives on the app object.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from contextlib import asynccontextmanager
 
@@ -25,6 +26,7 @@ from config.settings import Settings
 from config.settings import settings as default_settings
 from config.startup import log_startup
 from contracts.v1.generated.contracts import ConfigureReplay
+from services import checkpoint
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
 from services.gateway.idempotency import IdempotencyStore
 from services.gateway.ratelimit import RateLimiter
@@ -42,6 +44,11 @@ from services.gateway.streams import (
     StreamProducer,
     watch_health,
 )
+
+logger = logging.getLogger(__name__)
+
+#: This process's checkpoint name, as listed in `[checkpoint].outbound_readers`.
+GATEWAY_PROCESS = "gateway"
 
 REPLAY_CONFIGURATION_CLIENT_ORDER_ID = 0
 
@@ -91,15 +98,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # gateway rebuilds reservations identically. Starting the watcher and yielding would
         # leave a window in which the gateway is answering with every commitment forgotten,
         # so an account could spend the same ticks twice in the first moments after a restart.
+        #
+        # From the gateway's checkpoint when it has one (Open Issue 020): balances and
+        # commitments as of a stream id, then only the records after it. Market makers still
+        # come from the database above — they are configuration, not replayed state. A stream
+        # trimmed past the resume point raises here and the gateway does not start: serving
+        # orders against balances rebuilt from a partial history is the failure 020 exists for.
+        saved = await checkpoint.resume_positions(
+            stream_redis, GATEWAY_PROCESS, [settings.stream_outbound], config_hash=settings.config_hash
+        )
+        if saved is not None:
+            app.state.risk.load_state(saved.state)
+            app.state.risk.last_seq = saved.positions[settings.stream_outbound]
+        app.state.risk_resumed_from_checkpoint = saved is not None
         app.state.risk_replayed = await app.state.risk.replay_from_stream(
             stream_redis, settings.stream_outbound
         )
+
+        async def save_risk_checkpoint() -> None:
+            # `dump_state` is synchronous, so no request can interleave with it; the save
+            # afterwards may, and does not need to — the bytes are already one moment.
+            state = app.state.risk.dump_state()
+            position = app.state.risk.last_seq
+            await checkpoint.save(
+                stream_redis,
+                GATEWAY_PROCESS,
+                positions={settings.stream_outbound: position},
+                state=state,
+                config_hash=settings.config_hash,
+            )
+
+        await save_risk_checkpoint()
 
         app.state.halt = HaltState()
         app.state.streams = StreamProducer(
             stream_redis,
             app.state.halt,
-            maxlen=settings.stream_maxlen,
             batch_max=settings.stream_batch_max,
         )
         app.state.streams.start()
@@ -119,6 +153,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
             name="risk-stream-watcher",
         )
+        async def checkpoint_forever() -> None:
+            while True:
+                await asyncio.sleep(settings.checkpoint_interval_ms / 1000)
+                try:
+                    await save_risk_checkpoint()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 — a missed checkpoint pins trimming, no more
+                    logger.exception("gateway: risk checkpoint failed; will retry")
+
+        checkpoint_task = asyncio.create_task(checkpoint_forever(), name="risk-checkpoint")
         health_stop = asyncio.Event()
         health_task = asyncio.create_task(
             watch_health(
@@ -132,6 +177,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            checkpoint_task.cancel()
+            try:
+                await checkpoint_task
+            except (asyncio.CancelledError, Exception):
+                pass
             risk_stop.set()
             app.state.risk_task.cancel()
             try:

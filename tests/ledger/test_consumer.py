@@ -198,3 +198,36 @@ async def test_live_flush_writes_only_what_the_batch_touched():
     assert not any(s.strip() == "DELETE FROM open_orders" for s, _ in statements)
     assert not any("INSERT INTO open_orders" in s for s, _ in statements)
     assert [p for s, p in statements if "DELETE FROM open_orders WHERE" in s] == [[{"order_id": 1_000}]]
+
+
+def test_ledger_state_round_trips_byte_for_byte():
+    """Open Issue 020: a checkpointed ledger continues exactly as the uninterrupted one."""
+    events = [
+        AccountCreated.new(timestamp_ns=1, client_order_id=1, user_id=1, initial_cash_ticks=1_000_000),
+        AccountCreated.new(timestamp_ns=2, client_order_id=2, user_id=2, initial_cash_ticks=2_000_000),
+        OrderAccepted.new(
+            timestamp_ns=3, order_id=10, client_order_id=3, user_id=1, symbol_id=1,
+            side=Side.BUY, price_ticks=10_000, qty=10, tif=Tif.GTC,
+        ),
+        Fill.new(
+            timestamp_ns=4, maker_order_id=10, taker_order_id=11, maker_user_id=1,
+            taker_user_id=2, price_ticks=10_000, qty=4, symbol_id=1, aggressor_side=Side.SELL,
+        ),
+        CashCredited.new(timestamp_ns=5, client_order_id=5, user_id=2, amount_ticks=7),
+        OrderCancelled.new(
+            timestamp_ns=6, order_id=10, client_order_id=3, user_id=1, symbol_id=1,
+            remaining_qty=6, reason=CancelReason.USER_REQUESTED,
+        ),
+    ]
+    for cut in range(len(events) + 1):
+        whole = Ledger()
+        for e in events:
+            whole.apply(e)
+        head = Ledger()
+        for e in events[:cut]:
+            head.apply(e)
+        resumed = Ledger.load_state(head.dump_state())
+        assert resumed.dump_state() == head.dump_state()
+        for e in events[cut:]:
+            resumed.apply(e)
+        assert resumed.dump_state() == whole.dump_state()

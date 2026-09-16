@@ -32,9 +32,11 @@ async def main() -> None:
 
     replayed = await matcher.recover()
     print(
-        f"matcher: replayed {replayed} inbound records in "
-        f"{matcher.last_recovery_seconds:.6f}s, resuming at {matcher.last_inbound_id}"
+        f"matcher: {'checkpoint' if matcher.resumed_from_checkpoint else 'genesis'} + "
+        f"{replayed} inbound records in {matcher.last_recovery_seconds:.6f}s, "
+        f"resuming at {matcher.last_inbound_id}"
     )
+    await matcher.write_checkpoint()
 
     watchdog = asyncio.create_task(
         watch_health(redis, halt, poll_ms=settings.stream_health_poll_ms),

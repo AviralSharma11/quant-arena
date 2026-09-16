@@ -310,6 +310,8 @@ both improve on all three criteria at once.
 
 ### 13.1 SIMPLIFIED — 4b: no snapshots or checkpointing in Phase 1
 
+> **Superseded 2026-09-16 by Open Issue 020:** checkpointing is in Phase 1. Kept for the record.
+
 **Proposed was:** periodic checkpoint (offset plus state snapshot), replay forward on restart —
 for both the engine and the gateway's risk state.
 
@@ -332,6 +334,9 @@ precisely the kind of figure a Phase 2 optimisation improves dramatically.
 system is expected to survive.
 
 ### 13.2 SIMPLIFIED — 4a: the archive is not correctness-critical in Phase 1
+
+> **Retention rule superseded 2026-09-16 by Open Issue 020:** streams trim below the oldest
+> checkpoint, not at a fixed `MAXLEN`. The archive remains non-critical.
 
 **Proposed was:** the Redis stream is authoritative over the retained window and **the archive is
 authoritative beyond it** — which made the archiver load-bearing for correctness, since falling

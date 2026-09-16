@@ -131,8 +131,8 @@ class StreamProducer:
         redis: Redis,
         halt: HaltState,
         *,
-        maxlen: int,
         batch_max: int,
+        maxlen: int | None = None,
     ) -> None:
         self._redis = redis
         self._halt = halt
@@ -225,6 +225,9 @@ class StreamProducer:
         try:
             pipe = self._redis.pipeline(transaction=False)
             for item in batch:
+                # No MAXLEN in production: streams are trimmed below the oldest checkpoint by
+                # `services.checkpoint.trim` (Open Issue 020). A length cap is kept for tests
+                # and benchmarks that want a bounded scratch stream.
                 pipe.xadd(
                     item.stream,
                     {RECORD_FIELD: item.payload},

@@ -113,6 +113,34 @@ void write_frame(const Bytes& data) {
     std::cout.flush();
 }
 
+// Engine snapshot codec (Open Issue 020). The layout is documented, and mirrored byte for byte,
+// in `services/matcher/snapshot.py`; the parity test compares this worker's bytes with the
+// naive matcher's.
+constexpr std::size_t SNAPSHOT_HEAD_SIZE = 4 + 8 + 4;
+constexpr std::size_t SNAPSHOT_ORDER_SIZE = 8 + 8 + 8 + 2 + 1 + 1 + 8 + 8 + 8;
+
+void put_le(Bytes& out, std::uint64_t value, std::size_t width) {
+    for (std::size_t i = 0; i < width; ++i) {
+        out.push_back(static_cast<Byte>((value >> (8 * i)) & 0xff));
+    }
+}
+
+std::uint64_t get_le(const Bytes& in, std::size_t& offset, std::size_t width) {
+    if (offset + width > in.size()) {
+        throw std::runtime_error("engine snapshot is truncated");
+    }
+    std::uint64_t value = 0;
+    for (std::size_t i = 0; i < width; ++i) {
+        value |= static_cast<std::uint64_t>(in[offset + i]) << (8 * i);
+    }
+    offset += width;
+    return value;
+}
+
+bool frame_is(const Bytes& frame, const char* magic) {
+    return frame.size() >= 4 && std::memcmp(frame.data(), magic, 4) == 0;
+}
+
 struct LiveOrder {
     std::uint64_t order_id;
     std::uint64_t client_order_id;
@@ -126,6 +154,81 @@ class StreamEngine {
 public:
     explicit StreamEngine(std::int64_t initial_cash_ticks)
         : initial_cash_ticks_(initial_cash_ticks) {}
+
+    /// Every live order and the next id, in the format `snapshot.py` documents. `live_` is a
+    /// std::map, so iteration is ascending `order_id` — deterministic, and already the order the
+    /// format requires.
+    Bytes snapshot() {
+        Bytes out;
+        out.insert(out.end(), {'Q', 'A', 'S', '1'});
+        put_le(out, next_order_id_, 8);
+        put_le(out, static_cast<std::uint64_t>(live_.size()), 4);
+        for (const auto& [order_id, live] : live_) {
+            const auto order = book(live.symbol_id).get_order(static_cast<long long>(order_id));
+            if (!order.has_value()) {
+                throw std::runtime_error("live order is missing from its book");
+            }
+            const auto indexed = client_to_order_.find(client_key(live.user_id, live.client_order_id));
+            put_le(out, order_id, 8);
+            put_le(out, live.client_order_id, 8);
+            put_le(out, live.user_id, 8);
+            put_le(out, static_cast<std::uint16_t>(live.symbol_id), 2);
+            put_le(out, live.side, 1);
+            put_le(out, indexed != client_to_order_.end() && indexed->second == order_id ? 1 : 0, 1);
+            put_le(out, static_cast<std::uint64_t>(live.price_ticks), 8);
+            put_le(out, static_cast<std::uint64_t>(order->remaining_quantity), 8);
+            put_le(out, static_cast<std::uint64_t>(order->created_at), 8);
+        }
+        return out;
+    }
+
+    /// Load a snapshot into an engine that has applied nothing. Orders are re-added in ascending
+    /// `order_id`, which is arrival order, so every queue and arrival comparison is rebuilt.
+    void restore(const Bytes& data) {
+        if (next_order_id_ != 1 || !live_.empty() || !books_.empty()) {
+            throw std::runtime_error("a snapshot can only be restored into a fresh engine");
+        }
+        std::size_t offset = 4;
+        const auto next_order_id = get_le(data, offset, 8);
+        const auto count = get_le(data, offset, 4);
+        if (data.size() != SNAPSHOT_HEAD_SIZE + count * SNAPSHOT_ORDER_SIZE) {
+            throw std::runtime_error("engine snapshot length does not match its order count");
+        }
+        std::uint64_t previous = 0;
+        for (std::uint64_t i = 0; i < count; ++i) {
+            const auto order_id = get_le(data, offset, 8);
+            const auto client_order_id = get_le(data, offset, 8);
+            const auto user_id = get_le(data, offset, 8);
+            const auto symbol_id = static_cast<std::int16_t>(get_le(data, offset, 2));
+            const auto side = static_cast<std::uint8_t>(get_le(data, offset, 1));
+            const auto indexed = get_le(data, offset, 1) != 0;
+            const auto price_ticks = static_cast<std::int64_t>(get_le(data, offset, 8));
+            const auto remaining = static_cast<std::int64_t>(get_le(data, offset, 8));
+            const auto created_at = static_cast<std::int64_t>(get_le(data, offset, 8));
+            if (order_id <= previous || order_id >= next_order_id) {
+                throw std::runtime_error("engine snapshot orders are not ascending below next_order_id");
+            }
+            if (side != static_cast<std::uint8_t>(contracts::Side::BUY) &&
+                side != static_cast<std::uint8_t>(contracts::Side::SELL)) {
+                throw std::runtime_error("engine snapshot order has an invalid side");
+            }
+            previous = order_id;
+            live_[order_id] = LiveOrder{order_id, client_order_id, user_id, symbol_id, side, price_ticks};
+            if (indexed) {
+                client_to_order_[client_key(user_id, client_order_id)] = order_id;
+            }
+            book(symbol_id).add_order(Order{
+                static_cast<long long>(order_id),
+                static_cast<long long>(user_id),
+                std::to_string(symbol_id),
+                side == static_cast<std::uint8_t>(contracts::Side::BUY) ? Side::Buy : Side::Sell,
+                static_cast<long long>(price_ticks),
+                static_cast<long long>(remaining),
+                created_at,
+            });
+        }
+        next_order_id_ = next_order_id;
+    }
 
     std::vector<Bytes> apply(const Bytes& record) {
         const auto header = unpack_header(record);
@@ -395,8 +498,16 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("zero-length input records are not allowed");
             }
             const auto input = read_frame(length);
-            for (const auto& output : engine.apply(input)) {
-                write_frame(output);
+            // Two control frames sit beside contract records (Open Issue 020). Neither magic can
+            // open a record: a record begins with its u16 schema_version, not ASCII "QA".
+            if (input.size() == 4 && frame_is(input, "QASN")) {
+                write_frame(engine.snapshot());
+            } else if (frame_is(input, "QAS1")) {
+                engine.restore(input);
+            } else {
+                for (const auto& output : engine.apply(input)) {
+                    write_frame(output);
+                }
             }
             write_frame({});
         }

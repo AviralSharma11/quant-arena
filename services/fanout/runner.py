@@ -22,6 +22,7 @@ on an unknown id for exactly that reason.
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 import logging
 from collections.abc import Callable
@@ -31,9 +32,12 @@ from redis.asyncio import Redis
 
 from config.settings import Settings
 from services.fanout.state import MarketState
+from services import checkpoint
 from services.gateway.streams import read_records
 
 LOGGER_NAME = "quant_arena.fanout"
+#: This process's checkpoint name, as listed in `[checkpoint].outbound_readers`.
+PROCESS = "fanout"
 
 
 class FanOut:
@@ -63,10 +67,21 @@ class FanOut:
         self.poll_block_ms = poll_block_ms
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self.resumed_from_checkpoint = False
+        self._last_checkpoint = time.monotonic()
 
     async def recover(self) -> int:
-        """Rebuild from genesis. Returns the number of records replayed."""
-        last_id, replayed = "0-0", 0
+        """Restore the checkpoint, or start from genesis, and replay the rest. Returns records
+        replayed. Raises `CheckpointRefused` on a stream trimmed past the resume point."""
+        saved = await checkpoint.resume_positions(
+            self.redis, PROCESS, [self.settings.stream_outbound],
+            config_hash=self.settings.config_hash,
+        )
+        if saved is not None:
+            self.state.load_state(saved.state)
+            self.state.last_seq = saved.positions[self.settings.stream_outbound]
+        self.resumed_from_checkpoint = saved is not None
+        last_id, replayed = self.state.last_seq, 0
         while True:
             batch = await read_records(
                 self.redis,
@@ -100,10 +115,24 @@ class FanOut:
                 self.on_record(item.record, item.stream_id)
         return len(batch)
 
+    async def write_checkpoint(self) -> None:
+        await checkpoint.save(
+            self.redis,
+            PROCESS,
+            positions={self.settings.stream_outbound: self.state.last_seq},
+            state=self.state.dump_state(),
+            config_hash=self.settings.config_hash,
+        )
+        self._last_checkpoint = time.monotonic()
+
     async def run(self) -> None:
+        interval = self.settings.checkpoint_interval_ms / 1000
         while not self._stop.is_set():
             try:
-                if not await self.step():
+                handled = await self.step()
+                if time.monotonic() - self._last_checkpoint >= interval:
+                    await self.write_checkpoint()
+                if not handled:
                     await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break

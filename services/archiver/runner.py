@@ -37,6 +37,7 @@ pure function of the input: two runs over the same stream produce the same files
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 import logging
 
@@ -45,9 +46,12 @@ from redis.asyncio import Redis
 from config.settings import Settings
 from services.archiver.state import DEFAULT_FLUSH_SECONDS, ArchiveState
 from services.archiver.writer import ArchiveWriter
+from services import checkpoint
 from services.gateway.streams import read_records
 
 LOGGER_NAME = "quant_arena.archiver"
+#: This process's checkpoint name, as listed in `[checkpoint].outbound_readers`.
+PROCESS = "archiver"
 
 
 class Archiver:
@@ -77,6 +81,7 @@ class Archiver:
         self.batch_size = batch_size
         self.poll_block_ms = poll_block_ms
         self.position: str = "0-0"
+        self._last_published = 0.0
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -87,6 +92,30 @@ class Archiver:
         recorded = self.writer.read_checkpoint()
         self.position = recorded or "0-0"
         return self.position
+
+    async def ensure_resumable(self) -> None:
+        """Open Issue 020's guard. The archive's own bookmark lives on disk, but trimming is
+        decided in Redis, so the position is checked against the stream before reading from it:
+        a file set continued across a trimmed gap would have silent holes in its history."""
+        await checkpoint.ensure_resumable(
+            self.redis, PROCESS, self.settings.stream_outbound, self.position
+        )
+
+    async def publish_position(self) -> None:
+        """Tell the trimmer where this process would resume: the on-disk low-water mark, not the
+        read position, because a restart re-derives everything after the mark.
+
+        The archiver checkpoints only its position in Redis. Its derivation state is rebuilt
+        from the mark, as it was before Open Issue 020 — the archive is not correctness-critical
+        (Open Issue 018 §13.2), and nothing here changes that."""
+        await checkpoint.save(
+            self.redis,
+            PROCESS,
+            positions={self.settings.stream_outbound: self.writer.read_checkpoint() or "0-0"},
+            state=b"",
+            config_hash=self.settings.config_hash,
+        )
+        self._last_published = time.monotonic()
 
     async def step(self) -> int:
         """One read-apply-write cycle. Returns how many records were handled.
@@ -130,7 +159,11 @@ class Archiver:
     async def run(self) -> None:
         while not self._stop.is_set():
             try:
-                if not await self.step():
+                handled = await self.step()
+                interval = self.settings.checkpoint_interval_ms / 1000
+                if time.monotonic() - self._last_published >= interval:
+                    await self.publish_position()
+                if not handled:
                     await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break

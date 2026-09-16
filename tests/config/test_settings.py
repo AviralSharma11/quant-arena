@@ -85,10 +85,14 @@ _MINIMAL_CONFIG = """
     [replay]
     real_seconds_per_simulated_minute = 1
     data_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+    [checkpoint]
+    interval_ms = 1000
+    trim_interval_ms = 1000
+    inbound_readers = ["matcher"]
+    outbound_readers = ["matcher"]
     [streams]
     inbound = "in"
     outbound = "out"
-    maxlen = 10
     batch_max = 10
     health_poll_ms = 500
     [[symbols.listed]]

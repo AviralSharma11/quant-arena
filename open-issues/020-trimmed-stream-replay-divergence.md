@@ -1,10 +1,10 @@
 # Open Issue 020 — A restart after the stream trims silently forks the engine from its consumers
 
-**Status:** OPEN — needs a decision from Dev B and Dev A
+**Status:** RESOLVED (2026-09-16) — checkpointing adopted in Phase 1, by Dev B's decision
 **Opened:** 2026-09-16
 **Sources:** Open Issue 003 (Redis Streams is the log), 018 §13.1 and §13.2 (no snapshots; the
 retained window must exceed any session), `config/quant_arena.toml` `[streams] maxlen`
-**Owner:** _unassigned_ — the matcher and engine are Dev A's; the consumers are Dev B's
+**Owner:** Dev B (engine and matcher taken over from Dev A, 2026-09-16)
 
 ---
 
@@ -109,5 +109,37 @@ that §13.1 removed, and Phase 1 scope is closed. **Not recommended for Phase 1.
 
 ## 6. Decision
 
-_Open._ Needs agreement on A, B or C, and, if A, the retention figure and who implements the
-matcher-side guard (Dev A's code).
+**C, with A's guard — decided by Dev B, 2026-09-16.** Checkpointing moves from Phase 2 into
+Phase 1, reversing 018 §13.1–13.2:
+
+- Every replaying process (engine and matcher, gateway risk, ledger, fan-out, archiver) saves its
+  state and the stream id it reflects; a restart loads the checkpoint and replays only the tail.
+- Streams trim by `MINID` below the oldest checkpoint among their readers, never by `MAXLEN`.
+  A reader with no checkpoint blocks trimming.
+- A checkpoint older than the stream's first entry, or no checkpoint on a stream that no longer
+  starts at genesis, **halts** the process — never a partial replay.
+- The gateway's risk checkpoint is a recovery aid only; risk state still lives in process memory
+  and nothing on the order path reads Redis for it (004).
+- Dev B takes over the engine and matcher changes this needs from Dev A.
+
+## 7. Implemented and measured (2026-09-16, branch `task/020-checkpointing`)
+
+Measured on the live stack, with the bots trading:
+
+| | From genesis | From checkpoint |
+|---|---|---|
+| C++ matcher | 95,443 inbound records, 5.52 s | 1,074 records, **0.17 s** |
+| Ledger | 141,638 outbound records | 101 records |
+| Fan-out | 141,638 outbound records | 2,171 records |
+
+After trimming had removed most of both streams (outbound: 2,247 retained of 154,833 added), every
+process was restarted. All five resumed from their checkpoints. Order ids across the restart were
+strictly increasing (14,190 accepted orders, no step down), and all ten symbols kept trading
+(454–612 fills each in 90 s). Books showed no persistent cross; a one-tick cross unrelated to
+restarts is recorded as BUG-004.
+
+Tests: engine snapshot byte parity between C++ and the naive matcher, and snapshot + tail equal to an
+uninterrupted run, both as property tests; a matcher trimmed below its checkpoint and restarted
+reproduces the uninterrupted outbound tail and final snapshot; a checkpoint the stream was trimmed
+past, and a trimmed stream with no checkpoint, are refused; ledger, gateway risk (including
+in-flight reservations) and fan-out state survive checkpoints at every cut.
