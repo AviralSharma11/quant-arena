@@ -1,13 +1,14 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-13 · **HEAD** `4a4f771` (branch `task/ui-redesign`; `origin/main` is
-`a487141`, PR #25 merged) · **Week 7**
+**Last updated:** 2026-09-16 · **HEAD** `add6486` (branch `task/7.4-benchmark-report`;
+`origin/main` is `3c2afc0`, PR #26 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
 costing 0.82% of the account. **7.3 is merged** (PR #25) — four integration tests against the
-live stack, both layer-blame branches proven by breaking it on purpose. **804 pass, 7 skipped**,
-none failing. **3.3 is on hold by your decision (2026-09-09)**. **The market is live**, and the
-twelve-hour bot re-auth was observed on 2026-09-09 (see Archive).
+live stack, both layer-blame branches proven by breaking it on purpose. **The UI redesign is
+merged** (PR #26). **7.4 was taken over from Dev A on 2026-09-16 by your decision and all five of
+its Success Criteria now pass.** **3.3 is on hold by your decision (2026-09-09)**. **The market
+is live**, and the twelve-hour bot re-auth was observed on 2026-09-09 (see Archive).
 **Dev A reported 1.2, 2.3, 2.4, 3.4 and 4.1 done (2026-09-05)**; the stack matches in C++ and
 serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, `contracts/v1/`.
 
@@ -18,14 +19,20 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
-**Open the UI-redesign PR, then click through the backtest screen** — Dev B · **next**
+**Open the PR for `task/7.4-benchmark-report`, then click through the backtest screen** — Dev B · **next**
 
-- **`task/ui-redesign` is pushed** — the three-screen redesign, plus `4a4f771`, which fixed CI by
-  updating two web tests that asserted removed source text. Open its PR against `main`. `gh` is
-  installed (`~/.local/bin/gh`) but not logged in: `! gh auth login`.
+- **`task/7.4-benchmark-report` is six commits ahead of `origin/main`** and unpushed: `76659c9`
+  `117f688` `1f69d77` `06c231c` `5b39064` `add6486`. `gh` is installed (`~/.local/bin/gh`) but
+  not logged in: `! gh auth login`.
+- **matplotlib needs your approval.** Added to `requirements-dev.txt` only, for
+  `benchmarks/plot_results.py`. Task 7.4's Tech Stack names it, but it is not on `CLAUDE.md`'s
+  closed stack list, so it is flagged rather than assumed. No service imports it.
 - **A second session is working in this checkout** — a locked worktree at
   `.claude/worktrees/docs-stitch-spec` (branch `worktree-docs-stitch-spec`, `STITCH_BRIEF.md`).
   Do not rewrite shared history without checking with it first.
+- **The benchmark runs left resting probe orders in every symbol's book.** One tick, never trade,
+  excluded from measurement by price. Harmless to prices; a future measurement that forgets them
+  will misread the book. Cleared only by `docker compose down -v`.
 - **`f3e5f50` on the already-merged `task/7.2-backtest-screen` deletes the whole backtester** —
   712 lines: `bars.py`, `manifest.py`, `runner.py`, `test_runner.py`. `main` is intact. Do not
   merge that branch again; decide whether to keep or delete it.
@@ -42,7 +49,7 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## Then next
 
-1. **7.5** Definition-of-done walk (joint) — blocked on Dev A's 7.4, `A:unknown` since 05 Sep
+1. **7.5** Definition-of-done walk (joint) — **7.4 no longer blocks it**; still needs Dev A
 2. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
    terminator, neither of which is mine to choose. See Blocked.
 
@@ -71,8 +78,17 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 - **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
   for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
   Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
-- **On Dev A — 6.3, 6.4 and 7.4 have never been reported**, and 7.4 blocks the joint 7.5. The
-  existing ask names only 4.2, 4.3 and 5.3; these three belong in it.
+- **On Dev A — 6.3 and 6.4 have never been reported.** 7.4 is no longer among them. The existing
+  ask names only 4.2, 4.3 and 5.3; these two belong in it.
+- **4.3 may now be duplicated.** 4.3 is Dev A's "Native engine benchmark (B1)" and is
+  `A:unknown`; the repository held no B1 harness, and 7.4's criterion 1 cannot be met without B1
+  numbers, so `engine/cpp/bench_order_book.cpp` was written. If Dev A lands 4.3, one of the two
+  should go — ask before they build it.
+- **On Dev A — an inbound record the engine never answered.** `client_order_id`
+  1789541146582505 (user 70) sits in the inbound stream at `1789541146596-0` with no outbound
+  record of any kind; 2,431 subsequent outbound records reference nothing. Not reproduced in six
+  attempts; matcher `RestartCount` 0, up since 2026-09-13. The record is still in the stream.
+  Found by `scripts/trace.py` on its first real use. Reported, not diagnosed — it is their code.
 
 ---
 
@@ -84,11 +100,11 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 |---|---|---|---|---|
 | 3.3  Public deployment and CI | B | 3 | todo | **half merged** `5efe462` — CI gate, nightly, multi-arch images. Criteria 1 and 3 (HTTPS, one-command redeploy) outstanding; see Deviations |
 | 4.2  Engine process, Redis, replay recovery | A | 5 | A:todo | reported unfinished 2026-09-05 · `b644130` merged and live in compose |
-| 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | — |
+| 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | **possible duplicate** — see Blocked |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
 | 6.3  Open-loop load generator | A | 6 | A:unknown | — |
 | 6.4  Duplicate injection in load harness | A | 6 | A:unknown | — |
-| 7.4  Benchmarks, trace tool, report | A | 7 | A:unknown | — |
+| 7.4  Benchmarks, trace tool, report | ~~A~~ B | 7 | done | `add6486` · **5 of 5 criteria** · B1 `engine/cpp/bench_order_book.cpp` (matching 166 ns p50), B2 `benchmarks/bench_e2e.py` (open loop, knee 200–300/s), B3 `bench_scaling.py` (800 clients, 0 refused), `bench_conflation.py`, `bench_market_quality.py` (0 obligation breaches), `scripts/trace.py` + 5 tests, `benchmarks/results/7.4-benchmark-report.md` · **one Boundary unmet — see Deviations** |
 | 7.1  Backtester | B | 7 | done | `fbf81ce` · 43 tests, all in the per-commit suite (+0.67s) · **5 of 5 criteria** · `test_two_runs_of_one_manifest_are_byte_identical`, `test_the_strategy_is_handed_one_bar_at_a_time_and_never_a_series`, `test_every_fill_pays_the_takers_fee_from_the_ledger_not_a_local_copy` |
 | 7.2  Backtest screen | B | 7 | done | `3941931` · 27 tests (16 gateway, 11 web) · criterion 2 by test; criterion 1's server half verified live, browser half not — see Deviations · `tests/web/` + `tests/backtest/` 129 pass on `6485c50` · includes the `/backtests` endpoint, Dev B's by the 2026-09-09 decision |
 | 7.3  Integration tests (T5, thinned) | B | 7 | done | `18e63db` · `tests/integration/`, 4 tests · **2 of 2 criteria** · criterion 2 demonstrated by breaking the stack: `stop ledger` names the ledger, `stop matcher` names the matcher |
@@ -112,6 +128,10 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 
 | Date | Decision | Why | Amends |
 |---|---|---|---|
+| 2026-09-16 | **Dev B takes over 7.4** | Dev A's 7.4 was `A:unknown` since 05 Sep and blocked the joint 7.5. Your call, made explicitly rather than drifted into | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
+| 2026-09-16 | **Private frames are handed to the writer when offered, not on the conflation tick** | OI 006 exempts private data from conflation; the implementation honoured that as "never dropped" while still making it wait a uniform 0–50 ms for a tick. Measured: ptail p50 ~32 ms → ~3.4 ms, 5.2's criteria 1 and 5 re-verified | implements OI 006 as written |
+| 2026-09-16 | **A known-biased metric is deleted, not annotated** | `bench_e2e`'s `book_delay` timed a frame against its own `seq`, which is the newest record folded in — it read 5–9 ms against a 50 ms window. A wrong number left in a tool's output gets quoted eventually | — |
+| 2026-09-16 | **B2 load is dealt across accounts and 429s are never retried** | `max_orders_per_second` is 1,000 per user, so a single-account ramp measures the rate limiter; a retry would reintroduce coordinated omission through the side door | applies OI 012 §2 |
 | 2026-09-10 | T5's diagnostic measures progress by **stream id, never by `XLEN`** | `streams.maxlen` is 2,000,000 with `MAXLEN ~` trimming, so on a day-old stack the length has plateaued and two readings can be equal while records pour through. Stream ids are monotonic and never reused (OI 003) | applies OI 003 |
 | 2026-09-10 | T5 asks whether **our anchor** is on the outbound stream, not whether the stream moved | The market makers trade continuously, so outbound always advances; reading that as "the matcher is fine" blames the ledger for a matcher that has not reached us yet. One anchor per inbound record is `runner.py`'s own definition, reused rather than restated | — |
 | 2026-09-10 | The anchor scan origin is sampled **before the request**, never after | The matcher answers in single-digit milliseconds, so an origin taken at the start of the wait begins after the anchor was written — the anchor is not found and the matcher is blamed for work it had done | — |
@@ -165,12 +185,6 @@ a design change.
   sampled. That is `frameLoop.ts` behaving as documented, and it is why the number is missing.
 - **Dev A's C++ uses neither CMake, Catch2 nor nanobind** (all on the closed stack): a bare
   `g++` line, a hand-rolled test, a subprocess instead of a binding. Observed, not judged.
-- ~~`stream_engine.cpp` hand-codes record sizes and offsets~~ **Closed by Dev A's `ad65172`**: it
-  now uses the generated layouts, so `generate.py --check` is meaningful for the C++ again.
-- ~~5.1 Criterion 2 is half met~~ **Closed by Dev A's `0faeea7`.** `ConfigureReplay` is the first
-  record on every session's inbound stream and carries the ratio plus
-  `config_hash_hi`/`config_hash_lo` — which also closes the 31 Aug decision "config hash to the
-  stream in 2.1", never implemented at the time. `schema_version` is now 2.
 - **Latent defect, found not fixed: `runner.py` documents "every inbound record produces exactly
   one anchor" while `adapter.py` returns `[]` for unknown types.** Recovery counts anchors as its
   bookmark, so the first type producing none makes a restarted matcher re-process an answered
@@ -185,6 +199,22 @@ a design change.
 - **5.2's Criterion 1 was measured on one machine, not a separated topology.** Gateway, fan-out,
   200 sockets and the harness shared ten cores. Median (+4.2%) and encode counts hold; p95 and
   max are pessimistic — re-measure for 7.4.
+- **7.4's Boundary "run on the scratch deployment" is unmet, and unmeetable.** There is no
+  scratch deployment: 3.3's deployment half is on hold pending a deployment target. Everything
+  ran on one laptop, harness included. Stated before any number in the report and first in its
+  §9. Every harness is parameterised by host, so a second machine is a flag, not a rewrite.
+- **The benchmark report quotes no figure above ~300 orders/sec.** Above that the single-process
+  open-loop generator is the bottleneck: when the server slows, pending tasks crowd the event
+  loop and delay the wakeups of orders not yet sent. The 800/s row is printed and explicitly
+  marked not-evidence (`send_slip` p99 2.9 s) rather than deleted, because the reason generalises.
+- **B3 cannot confirm OI 006 §7b on this host.** Ack latency does move with the client count
+  (p50 6.41 ms at 50 → 24.63 ms at 800), but the harness holds all 800 sockets on the same ten
+  cores as the gateway it is timing, so "connection load reached the order path" and "everything
+  is fighting for the same cores" are indistinguishable. At 200 clients — the count 5.2's
+  criterion names — it is 7.90 against 6.41, inside noise. This is the re-measurement 5.2's
+  results file asked 7.4 for; the answer is that it still needs two hosts.
+- **`tests/integration/test_critical_path.py` errors on a clean tree** — 4 errors, an anyio
+  async-fixture problem at setup. Verified by stashing: pre-existing, not from this session.
 - **Fourth healthy-but-idle fault**, after fan-out not running, the matcher dead-but-healthy, and
   the archiver failing every `mkdir`. The gateway was genuinely fine — it was answering 401
   correctly — so no healthcheck could have caught this one. It was found only by comparing
