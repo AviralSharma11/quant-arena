@@ -100,13 +100,32 @@ class Subscriber:
         return True
 
     def offer_private(self, frame: str) -> bool:
-        """Queue one private message. Never skipped; a full buffer closes the connection."""
+        """Queue one private message and hand it over at once.
+
+        **Not held for the tick.** Open Issue 006 exempts private data from conflation, and
+        until Task 7.4 measured it that exemption was implemented only as "never *dropped*" —
+        the frame still sat in this buffer until the next 20 Hz flush. Measured cost: a
+        uniform nought-to-fifty millisecond wait, so a median of twenty-five, on the one path
+        the design had decided should not be waiting at all. It was the largest single
+        contributor to a trader's acknowledgement latency, and the matching it was waiting on
+        takes 166 nanoseconds (`benchmarks/results/7.4-benchmark-report.md`).
+
+        Market data still waits for the tick, which is the entire point of conflation: those
+        frames are superseded, so batching them is free. A private frame is never superseded,
+        so there is nothing to gain by holding it and twenty-five milliseconds to lose.
+
+        The hand-over sets `busy`, which means a market frame offered while a private write is
+        in flight is skipped for that tick. That is the existing, deliberate policy — the next
+        snapshot is complete and repairs it one frame later — and it is why the tick could
+        afford to skip in the first place.
+        """
         if self.closed:
             return False
         if len(self._private) >= self._private_max:
             self.overflowed.set()
             return False
         self._private.append(frame)
+        self._hand_over()
         return True
 
     # -- subscription ------------------------------------------------------------------------
@@ -131,9 +150,19 @@ class Subscriber:
             self._writer = asyncio.create_task(self._run(), name="subscriber-writer")
 
     def flush(self) -> None:
-        """Hand whatever has accumulated to the writer. Called once per tick."""
+        """Hand whatever has accumulated to the writer. Called once per tick.
+
+        Only market frames reach the writer this way now; a private frame handed itself over
+        when it was offered. The private drain stays in `_run` regardless, because a frame
+        offered while the writer was mid-write is still sitting in the deque when the tick
+        arrives, and it must not be left there.
+        """
         if self.closed or (not self._market and not self._private):
             return
+        self._hand_over()
+
+    def _hand_over(self) -> None:
+        """Wake the writer. One writer task per connection, so writes never interleave."""
         self.busy = True
         self._wake.set()
 

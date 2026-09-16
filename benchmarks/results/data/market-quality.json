@@ -1,0 +1,100 @@
+{
+  "benchmark": "market-quality",
+  "recorded_unix": 1789542597,
+  "symbols": 10,
+  "depth_levels": 5,
+  "steps": [
+    {
+      "rate_per_second": 0,
+      "began": "2026-09-16T07:08:36.823958+00:00",
+      "ended": "2026-09-16T07:08:56.824216+00:00",
+      "snapshots": 503,
+      "one_sided_snapshots": 16,
+      "spread_bps": {
+        "count": 487,
+        "p50": 46.296,
+        "p95": 48.062,
+        "p99": 19948.133,
+        "max": 19999.929
+      },
+      "thin_side_depth": {
+        "count": 487,
+        "p50": 100,
+        "p95": 100,
+        "p99": 100,
+        "max": 109
+      },
+      "send_slip_p99_ms": 0.0,
+      "obligation_breaches": {}
+    },
+    {
+      "rate_per_second": 100,
+      "began": "2026-09-16T07:08:56.824540+00:00",
+      "ended": "2026-09-16T07:09:17.019506+00:00",
+      "snapshots": 2252,
+      "one_sided_snapshots": 16,
+      "spread_bps": {
+        "count": 2236,
+        "p50": 46.358,
+        "p95": 48.036,
+        "p99": 53.745,
+        "max": 19997.561
+      },
+      "thin_side_depth": {
+        "count": 2236,
+        "p50": 100,
+        "p95": 100,
+        "p99": 100,
+        "max": 103
+      },
+      "send_slip_p99_ms": 0.996,
+      "obligation_breaches": {}
+    },
+    {
+      "rate_per_second": 200,
+      "began": "2026-09-16T07:09:17.020742+00:00",
+      "ended": "2026-09-16T07:09:37.222995+00:00",
+      "snapshots": 3826,
+      "one_sided_snapshots": 23,
+      "spread_bps": {
+        "count": 3803,
+        "p50": 46.363,
+        "p95": 48.013,
+        "p99": 48.057,
+        "max": 19999.929
+      },
+      "thin_side_depth": {
+        "count": 3803,
+        "p50": 100,
+        "p95": 100,
+        "p99": 100,
+        "max": 102
+      },
+      "send_slip_p99_ms": 1.051,
+      "obligation_breaches": {}
+    },
+    {
+      "rate_per_second": 300,
+      "began": "2026-09-16T07:09:37.223978+00:00",
+      "ended": "2026-09-16T07:09:57.427626+00:00",
+      "snapshots": 3927,
+      "one_sided_snapshots": 38,
+      "spread_bps": {
+        "count": 3889,
+        "p50": 46.352,
+        "p95": 48.001,
+        "p99": 48.029,
+        "max": 19999.929
+      },
+      "thin_side_depth": {
+        "count": 3889,
+        "p50": 100,
+        "p95": 100,
+        "p99": 100,
+        "max": 106
+      },
+      "send_slip_p99_ms": 1.158,
+      "obligation_breaches": {}
+    }
+  ]
+}
