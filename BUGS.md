@@ -80,3 +80,21 @@ The test stops and starts the Compose `redis` service **of the running stack**, 
 registered user to have an order accepted. That last step fails ("recovered, but never accepted an
 order"), with or without the checkpointing changes. Separately from the failure, running the gateway
 test suite bounces the live market's Redis; it should run against a scratch Compose project.
+
+---
+
+## BUG-004: a published L2 snapshot is occasionally crossed for one tick
+
+**Found:** 2026-09-16, verifying Open Issue 020 on the live stack · **Severity:** low (self-correcting) · **Status:** open
+
+Over 30 s of all ten `book:*:l2` channels, 7 of 913 snapshots had best bid ≥ best ask, and never
+two in a row for the same symbol: the next snapshot is always correct. This is not the restart fork
+(a phantom order stays crossed until it is removed).
+
+**Likely cause, not yet proven:** `FanOut.step` reads the outbound stream 100 records at a time, and
+the conflation tick can run between two reads. An aggressing order's `OrderAccepted` puts it on the
+book crossed; its `Fill` records, which remove the cross, may arrive in the next read. A snapshot
+taken in between shows the momentary cross. **Fix direction:** do not publish a symbol's book
+while an order accepted in the last read may still have fills pending, for example by holding a
+symbol dirty until a read ends on a record that is not an `OrderAccepted` for it. Confirm the cause
+first with a test that splits an accept and its fill across two reads.

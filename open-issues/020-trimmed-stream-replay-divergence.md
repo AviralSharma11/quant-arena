@@ -121,3 +121,25 @@ Phase 1, reversing 018 §13.1–13.2:
 - The gateway's risk checkpoint is a recovery aid only; risk state still lives in process memory
   and nothing on the order path reads Redis for it (004).
 - Dev B takes over the engine and matcher changes this needs from Dev A.
+
+## 7. Implemented and measured (2026-09-16, branch `task/020-checkpointing`)
+
+Measured on the live stack, with the bots trading:
+
+| | From genesis | From checkpoint |
+|---|---|---|
+| C++ matcher | 95,443 inbound records, 5.52 s | 1,074 records, **0.17 s** |
+| Ledger | 141,638 outbound records | 101 records |
+| Fan-out | 141,638 outbound records | 2,171 records |
+
+After trimming had removed most of both streams (outbound: 2,247 retained of 154,833 added), every
+process was restarted. All five resumed from their checkpoints. Order ids across the restart were
+strictly increasing (14,190 accepted orders, no step down), and all ten symbols kept trading
+(454–612 fills each in 90 s). Books showed no persistent cross; a one-tick cross unrelated to
+restarts is recorded as BUG-004.
+
+Tests: engine snapshot byte parity between C++ and the naive matcher, and snapshot + tail equal to an
+uninterrupted run, both as property tests; a matcher trimmed below its checkpoint and restarted
+reproduces the uninterrupted outbound tail and final snapshot; a checkpoint the stream was trimmed
+past, and a trimmed stream with no checkpoint, are refused; ledger, gateway risk (including
+in-flight reservations) and fan-out state survive checkpoints at every cut.
