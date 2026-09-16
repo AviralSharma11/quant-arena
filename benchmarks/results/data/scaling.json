@@ -1,0 +1,142 @@
+{
+  "benchmark": "B3-scaling",
+  "recorded_unix": 1789542307,
+  "channels_per_client": [
+    "book:QAA:l2",
+    "book:QAB:l2",
+    "book:QAC:l2"
+  ],
+  "redis_host_clock_offset_ms": -0.471,
+  "steps": [
+    {
+      "clients_requested": 50,
+      "clients_opened": 50,
+      "clients_refused": 0,
+      "update_delay": {
+        "count": 5219,
+        "min_ms": 1.504,
+        "p50_ms": 4.999,
+        "p95_ms": 13.547,
+        "p99_ms": 97.364,
+        "max_ms": 98.355
+      },
+      "ack_latency": {
+        "count": 100,
+        "min_ms": 3.448,
+        "p50_ms": 6.406,
+        "p95_ms": 11.118,
+        "p99_ms": 14.577,
+        "max_ms": 14.577
+      },
+      "frames_min": 103,
+      "frames_max": 105,
+      "ticks_during_step": 234,
+      "max_tick_seconds": 0.11622,
+      "serialisations_per_tick": 0.927
+    },
+    {
+      "clients_requested": 100,
+      "clients_opened": 100,
+      "clients_refused": 0,
+      "update_delay": {
+        "count": 9190,
+        "min_ms": 2.079,
+        "p50_ms": 10.655,
+        "p95_ms": 21.306,
+        "p99_ms": 211.048,
+        "max_ms": 260.812
+      },
+      "ack_latency": {
+        "count": 100,
+        "min_ms": 2.949,
+        "p50_ms": 5.064,
+        "p95_ms": 10.161,
+        "p99_ms": 13.342,
+        "max_ms": 13.342
+      },
+      "frames_min": 90,
+      "frames_max": 94,
+      "ticks_during_step": 232,
+      "max_tick_seconds": 0.11622,
+      "serialisations_per_tick": 0.875
+    },
+    {
+      "clients_requested": 200,
+      "clients_opened": 200,
+      "clients_refused": 0,
+      "update_delay": {
+        "count": 20105,
+        "min_ms": 3.195,
+        "p50_ms": 15.067,
+        "p95_ms": 35.586,
+        "p99_ms": 229.484,
+        "max_ms": 379.239
+      },
+      "ack_latency": {
+        "count": 100,
+        "min_ms": 3.179,
+        "p50_ms": 7.902,
+        "p95_ms": 17.003,
+        "p99_ms": 22.072,
+        "max_ms": 22.072
+      },
+      "frames_min": 96,
+      "frames_max": 102,
+      "ticks_during_step": 236,
+      "max_tick_seconds": 0.11622,
+      "serialisations_per_tick": 0.894
+    },
+    {
+      "clients_requested": 400,
+      "clients_opened": 400,
+      "clients_refused": 0,
+      "update_delay": {
+        "count": 51329,
+        "min_ms": 6.331,
+        "p50_ms": 26.901,
+        "p95_ms": 84.342,
+        "p99_ms": 875.186,
+        "max_ms": 1418.133
+      },
+      "ack_latency": {
+        "count": 100,
+        "min_ms": 4.853,
+        "p50_ms": 15.453,
+        "p95_ms": 35.687,
+        "p99_ms": 54.973,
+        "max_ms": 54.973
+      },
+      "frames_min": 123,
+      "frames_max": 133,
+      "ticks_during_step": 255,
+      "max_tick_seconds": 0.11622,
+      "serialisations_per_tick": 0.965
+    },
+    {
+      "clients_requested": 800,
+      "clients_opened": 800,
+      "clients_refused": 0,
+      "update_delay": {
+        "count": 88310,
+        "min_ms": 10.898,
+        "p50_ms": 34.313,
+        "p95_ms": 1367.552,
+        "p99_ms": 2191.507,
+        "max_ms": 2588.461
+      },
+      "ack_latency": {
+        "count": 100,
+        "min_ms": 4.659,
+        "p50_ms": 24.633,
+        "p95_ms": 70.002,
+        "p99_ms": 114.093,
+        "max_ms": 114.093
+      },
+      "frames_min": 100,
+      "frames_max": 120,
+      "ticks_during_step": 274,
+      "max_tick_seconds": 0.11622,
+      "serialisations_per_tick": 0.927
+    }
+  ]
+}

@@ -5,3 +5,8 @@
 
 pytest==9.1.1
 hypothesis==6.167.1
+
+# Task 7.4's Tech Stack names matplotlib, for the benchmark report's offline plots
+# (`benchmarks/plot_results.py`). Dev-only on purpose: Open Issue 012 settled observability as
+# structured logs plus offline analysis, so no service imports this and nothing draws at runtime.
+matplotlib==3.11.2
