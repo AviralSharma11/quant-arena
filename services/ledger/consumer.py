@@ -21,10 +21,13 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from services import checkpoint
 from services.gateway.streams import read_records
 from services.ledger.ledger import Ledger
 
 logger = logging.getLogger(__name__)
+
+PROCESS = "ledger"
 
 
 class LedgerConsumer:
@@ -39,6 +42,8 @@ class LedgerConsumer:
         *,
         batch_size: int = 100,
         poll_block_ms: int = 500,
+        config_hash: str = "",
+        checkpoint_interval_ms: int = 30_000,
     ) -> None:
         self.redis = redis
         self.db = db_engine
@@ -49,28 +54,58 @@ class LedgerConsumer:
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
         self._needs_full_flush = False
+        self.config_hash = config_hash
+        self.checkpoint_interval = checkpoint_interval_ms / 1000
+        self._last_checkpoint = time.monotonic()
+        self.resumed_from_checkpoint = False
+
+    async def recover(self) -> int:
+        """Resume from the ledger's checkpoint, or from genesis if it has none (Open Issue 020).
+
+        Replays the tail, then rewrites the read model in full: PostgreSQL may hold anything,
+        including rows from before a crash that the checkpoint does not reflect. Raises
+        `CheckpointRefused` if the outbound stream was trimmed past the resume point.
+        """
+        saved = await checkpoint.resume_positions(
+            self.redis, PROCESS, [self.stream_name], config_hash=self.config_hash
+        )
+        if saved is None:
+            return await self.replay_from_genesis()
+        self.ledger = Ledger.load_state(saved.state)
+        self.ledger.last_seq = saved.positions[self.stream_name]
+        self.resumed_from_checkpoint = True
+        replayed = await self._replay_after(self.ledger.last_seq)
+        await self.flush_to_db(full=True)
+        return replayed
+
+    async def write_checkpoint(self) -> None:
+        """Written only after a flush, so PostgreSQL and the checkpoint describe the same id."""
+        await checkpoint.save(
+            self.redis,
+            PROCESS,
+            positions={self.stream_name: self.ledger.last_seq},
+            state=self.ledger.dump_state(),
+            config_hash=self.config_hash,
+        )
+        self._last_checkpoint = time.monotonic()
+
+    async def _replay_after(self, last_id: str) -> int:
+        replayed = 0
+        while True:
+            batch = await read_records(
+                self.redis, self.stream_name, last_id=last_id, count=self.batch_size, block_ms=20
+            )
+            if not batch:
+                return replayed
+            for item in batch:
+                self.ledger.apply(item.record, stream_id=item.stream_id)
+                last_id = item.stream_id
+                replayed += 1
 
     async def replay_from_genesis(self) -> int:
         """Rebuild entire state by replaying the retained stream from 0-0."""
         self.ledger.reset()
-        last_id = "0-0"
-        replayed_count = 0
-
-        while True:
-            batch = await read_records(
-                self.redis,
-                self.stream_name,
-                last_id=last_id,
-                count=self.batch_size,
-                block_ms=20,
-            )
-            if not batch:
-                break
-            for item in batch:
-                self.ledger.apply(item.record, stream_id=item.stream_id)
-                last_id = item.stream_id
-                replayed_count += 1
-
+        replayed_count = await self._replay_after("0-0")
         await self.flush_to_db(full=True)
         return replayed_count
 
@@ -213,6 +248,8 @@ class LedgerConsumer:
                         last_id = item.stream_id
                     await self.flush_to_db(full=self._needs_full_flush)
                     self._needs_full_flush = False
+                    if time.monotonic() - self._last_checkpoint >= self.checkpoint_interval:
+                        await self.write_checkpoint()
                 else:
                     await asyncio.sleep(0.01)
             except asyncio.CancelledError:

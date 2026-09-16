@@ -11,11 +11,12 @@ long-running loop with no request attached to it. It also makes the ledger the *
 of `accounts`, `positions`, `open_orders` and `house_fees` — which is what Open Issue 004 means
 by PostgreSQL being a derived read model. Two writers and it would not be derived from anything.
 
-## Startup is a full replay, every time
+## Startup resumes from a checkpoint
 
-There are no snapshots and no checkpoints in Phase 1 (Open Issue 018 §13.1), so the ledger
-rebuilds from `0-0` on every start and rewrites the read model from what it computed. Slow
-recovery is the deliberate, measured Phase 2 baseline rather than an omission.
+The ledger restores its last checkpoint and replays only the outbound records after it, or
+replays from `0-0` if it has none, then rewrites the read model from what it computed (Open
+Issue 020). If the stream was trimmed past its resume point it refuses to start rather than
+publish balances built from a partial history.
 
 Replaying is safe to repeat in a way the matcher's replay is not: the matcher *appends* to a
 stream, so a naive replay would duplicate fills, which is why it counts anchors. The ledger only
@@ -46,12 +47,19 @@ async def main() -> None:
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
     db = create_async_engine(settings.database_url, pool_pre_ping=True)
 
-    consumer = LedgerConsumer(redis, db, settings.stream_outbound)
-    replayed = await consumer.replay_from_genesis()
-    print(
-        f"ledger: replayed {replayed} outbound records, "
-        f"resuming at {consumer.ledger.last_seq}"
+    consumer = LedgerConsumer(
+        redis,
+        db,
+        settings.stream_outbound,
+        config_hash=settings.config_hash,
+        checkpoint_interval_ms=settings.checkpoint_interval_ms,
     )
+    replayed = await consumer.recover()
+    print(
+        f"ledger: {'checkpoint' if consumer.resumed_from_checkpoint else 'genesis'} + "
+        f"{replayed} outbound records, resuming at {consumer.ledger.last_seq}"
+    )
+    await consumer.write_checkpoint()
 
     consumer.start()
     try:
