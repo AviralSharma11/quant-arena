@@ -124,9 +124,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # and self-correcting — would have no way to tell it apart from a real one.
         app.state.replayed = await fanout.recover()
         logging.getLogger(LOGGER_NAME).info(
-            '{"event":"fanout_recovered","records":%d,"resuming_at":"%s"}'
-            % (app.state.replayed, fanout.state.last_seq)
+            '{"event":"fanout_recovered","from":"%s","records":%d,"resuming_at":"%s"}'
+            % (
+                "checkpoint" if fanout.resumed_from_checkpoint else "genesis",
+                app.state.replayed,
+                fanout.state.last_seq,
+            )
         )
+        await fanout.write_checkpoint()
         # Only now: everything before this point is history (see `private.py`).
         fanout.on_record = lambda record, stream_id: private.route(record, stream_id=stream_id)
 

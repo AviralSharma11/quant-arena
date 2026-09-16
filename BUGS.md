@@ -52,3 +52,31 @@ decision that cannot mint or destroy money (a conservation property test).
 
 Changing it alters every stored balance, so it is a `docker compose down -v` or a replay under
 the new rule. Owner and schedule are not decided.
+
+---
+
+## BUG-002: an order the engine rejects keeps its cash reserved in the gateway
+
+**Found:** 2026-09-16, while adding checkpoints to `RiskState` · **Severity:** low (rare path) · **Status:** open
+
+`RiskState.reserve` records every submitted order in `pending_by_client` and adds its cost to
+`reserved`. The entry is cleared only by `OrderAccepted` (`services/gateway/risk.py`, `apply`);
+there is no `OrderRejected` branch. So when the gateway's own checks pass but the **engine** rejects
+the order, its reservation is never released, and the account's available cash stays reduced until
+the gateway restarts. The engine can reject for invalid price, quantity, side or TIF.
+
+It is rare because the gateway validates the same fields first. It also no longer survives a
+restart: a checkpoint excludes in-flight reservations (Open Issue 020). **Fix:** handle
+`OrderRejected` in `apply` by popping `(user_id, client_order_id)` from `pending_by_client` and
+releasing it, and add a test with an engine-only rejection.
+
+---
+
+## BUG-003: `tests/gateway/test_halt.py` fails, and it restarts the live Redis
+
+**Found:** 2026-09-16 · **Severity:** medium (test hygiene) · **Status:** open
+
+The test stops and starts the Compose `redis` service **of the running stack**, then expects a newly
+registered user to have an order accepted. That last step fails ("recovered, but never accepted an
+order"), with or without the checkpointing changes. Separately from the failure, running the gateway
+test suite bounces the live market's Redis; it should run against a scratch Compose project.
