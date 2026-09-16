@@ -36,11 +36,12 @@ so none of this needs an added tracing layer — the event stream is the trace (
   WebSocket, measured against the frame's `ts_ns` (the gateway's own stamp on the record). The
   private stream is **never conflated** — private data is never dropped (Open Issue 006) — so
   this is the fast path, and it is what a trader's own blotter feels.
-- **`book_delay`** — the public L2 feed, timed as receipt minus the millisecond of the outbound
-  stream id the frame reports in `seq`. This path *is* conflated at 20 Hz, and the gap between
-  it and `private_e2e` is the report's headline finding: the conflation window, chosen
-  deliberately for demo feel, dominates end-to-end latency by orders of magnitude while the
-  matching engine contributes almost nothing.
+The public L2 feed is **not** measured here. It was, briefly, as receipt minus the `seq` on the
+arriving frame — and that was wrong in the flattering direction, because `conflation.py` stamps
+a snapshot with `state.last_seq`, the newest record folded into it, so the subtraction gave the
+time since the *most recent* update rather than the wait endured by any particular one. It read
+5–9 ms against a 50 ms window. Measuring it honestly needs each order's own outbound stream id,
+which is `benchmarks/bench_conflation.py`.
 
 Wall-clock `time.time_ns()` is used rather than `perf_counter` wherever a local time is compared
 against a Redis stream id or a gateway stamp, because those come from other processes' clocks.
@@ -228,20 +229,18 @@ class Account:
 
 
 class BookObserver:
-    """One client on the public L2 feed, timing the conflated path.
+    """One client on the public L2 feed, counting frames so a dead feed is visible.
 
-    Delay is receipt minus the millisecond encoded in the frame's `seq` — the outbound stream id
-    the snapshot reflects, assigned by Redis when the engine's record was appended. That makes
-    this a measurement of everything after the engine: fan-out's read, the 20 Hz conflation wait,
-    serialisation, and the socket write. Millisecond granularity is coarse for a 50 µs socket
-    write and entirely adequate for a 50 ms conflation window, which is the thing being shown.
+    It deliberately does **not** time the public path. A frame's `seq` is the newest record
+    folded into that snapshot, so timing against it answers a question nobody asked. The count
+    is still worth having: a run where the book feed silently stopped would otherwise look like
+    a run where the book feed was fast. `benchmarks/bench_conflation.py` does the timing.
     """
 
     def __init__(self, cookie: str, channels: list[str]) -> None:
         self.cookie = cookie
         self.channels = channels
         self.socket = None
-        self.delays_ms: list[float] = []
         self.frames = 0
 
     async def open(self) -> None:
@@ -259,7 +258,6 @@ class BookObserver:
                 continue
             except Exception:
                 return
-            received = time.time_ns()
             try:
                 frame = json.loads(raw)
             except (TypeError, ValueError):
@@ -267,12 +265,7 @@ class BookObserver:
             channel = frame.get("ch", "")
             if not channel.startswith("book:"):
                 continue
-            seq = frame.get("seq") or ""
-            if "-" not in str(seq):
-                continue
             self.frames += 1
-            appended_ms = int(str(seq).split("-", 1)[0])
-            self.delays_ms.append((received - appended_ms * NS_PER_MS) / NS_PER_MS)
 
     async def close(self) -> None:
         if self.socket is not None:
@@ -298,7 +291,6 @@ class RateResult:
     send_slip: Distribution = field(default_factory=Distribution)
     append_hop: Distribution = field(default_factory=Distribution)
     private_tail: Distribution = field(default_factory=Distribution)
-    book_delay: Distribution = field(default_factory=Distribution)
     book_frames: int = 0
     achieved_rate: float = 0.0
 
@@ -317,7 +309,6 @@ class RateResult:
             "book_frames": self.book_frames,
             "http_ack": self.http_ack.as_dict(),
             "private_e2e": self.private_e2e.as_dict(),
-            "book_delay": self.book_delay.as_dict(),
             "send_slip": self.send_slip.as_dict(),
             "append_hop": self.append_hop.as_dict(),
             "private_tail": self.private_tail.as_dict(),
@@ -367,7 +358,6 @@ async def run_rate(
     samples: list[Sample] = []
     tasks: list[asyncio.Task] = []
     if observer is not None:
-        observer.delays_ms.clear()
         observer.frames = 0
     for account in accounts:
         account.receipts.clear()
@@ -437,7 +427,6 @@ async def run_rate(
     result.append_hop = Distribution.of(append_hop)
     result.private_tail = Distribution.of(private_tail)
     if observer is not None:
-        result.book_delay = Distribution.of(list(observer.delays_ms))
         result.book_frames = observer.frames
     return result
 
@@ -447,8 +436,7 @@ def print_results(results: list[RateResult]) -> None:
     header = (
         f"{'rate':>6} {'ok':>7} {'429':>6} {'err':>5} "
         f"{'ack p50':>9} {'ack p99':>9} {'ack max':>9} "
-        f"{'priv p50':>9} {'priv p99':>9} {'ptail p50':>10} "
-        f"{'book p50':>9} {'book p99':>9} {'slip p99':>9}"
+        f"{'priv p50':>9} {'priv p99':>9} {'ptail p50':>10} {'slip p99':>9}"
     )
     print(header)
     print("-" * len(header))
@@ -457,14 +445,15 @@ def print_results(results: list[RateResult]) -> None:
             f"{r.rate:>6} {r.accepted:>7} {r.rate_limited:>6} {r.errors:>5} "
             f"{r.http_ack.p50:>9.2f} {r.http_ack.p99:>9.2f} {r.http_ack.max:>9.2f} "
             f"{r.private_e2e.p50:>9.2f} {r.private_e2e.p99:>9.2f} {r.private_tail.p50:>10.2f} "
-            f"{r.book_delay.p50:>9.2f} {r.book_delay.p99:>9.2f} {r.send_slip.p99:>9.2f}"
+            f"{r.send_slip.p99:>9.2f}"
         )
     print(
         "\nack   = intended send to the gateway's 202\n"
         "priv  = intended send to OrderAccepted on the private feed — the user-facing number\n"
         "ptail = inbound append to that same frame: everything after durability, unconflated\n"
-        "book  = outbound append to L2 frame arrival: the same tail, conflated at 20 Hz\n"
-        "slip  = the harness's own lateness onto the wire"
+        "slip  = the harness's own lateness onto the wire\n"
+        "the conflated public feed is measured by benchmarks/bench_conflation.py, which anchors"
+        " on each order's\nown outbound id — the only way to get that number right"
     )
     worst_slip = max((r.send_slip.p99 for r in results), default=0.0)
     if worst_slip > 5.0:
