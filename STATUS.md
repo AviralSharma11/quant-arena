@@ -1,13 +1,12 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-16 · **HEAD** `add6486` (branch `task/7.4-benchmark-report`;
-`origin/main` is `3c2afc0`, PR #26 merged) · **Week 7**
+**Last updated:** 2026-09-16 · **HEAD** `8479f3e` (branch `task/7.5-definition-of-done`;
+`origin/main` is `1ebab7d`, PR #27 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
 costing 0.82% of the account. **7.3 is merged** (PR #25) — four integration tests against the
 live stack, both layer-blame branches proven by breaking it on purpose. **The UI redesign is
-merged** (PR #26). **7.4 was taken over from Dev A on 2026-09-16 by your decision and all five of
-its Success Criteria now pass.** **3.3 is on hold by your decision (2026-09-09)**. **The market
+merged** (PR #26). **7.4 is merged** (PR #27). **7.5 was completed by Dev B on 2026-09-16 by your decision and all four deliverables are committed.** **3.3 is on hold by your decision (2026-09-09)**. **The market
 is live**, and the twelve-hour bot re-auth was observed on 2026-09-09 (see Archive).
 **Dev A reported 1.2, 2.3, 2.4, 3.4 and 4.1 done (2026-09-05)**; the stack matches in C++ and
 serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, `contracts/v1/`.
@@ -19,11 +18,10 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
-**Open the PR for `task/7.4-benchmark-report`, then click through the backtest screen** — Dev B · **next**
+**Open the PR for `task/7.5-definition-of-done` to close Phase 1** — Dev B · **next**
 
-- **`task/7.4-benchmark-report` is six commits ahead of `origin/main`** and unpushed: `76659c9`
-  `117f688` `1f69d77` `06c231c` `5b39064` `add6486`. `gh` is installed (`~/.local/bin/gh`) but
-  not logged in: `! gh auth login`.
+- **`task/7.4-benchmark-report` is merged** (`1ebab7d`).
+- **`task/7.5-definition-of-done` is 1 commit ahead of `origin/main`** (`8479f3e`): `scripts/backup_postgres.sh`, `RUNBOOK.md`, `DEFINITION_OF_DONE.md`, `README.md`.
 - **matplotlib needs your approval.** Added to `requirements-dev.txt` only, for
   `benchmarks/plot_results.py`. Task 7.4's Tech Stack names it, but it is not on `CLAUDE.md`'s
   closed stack list, so it is flagged rather than assumed. No service imports it.
@@ -49,8 +47,7 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## Then next
 
-1. **7.5** Definition-of-done walk (joint) — **7.4 no longer blocks it**; still needs Dev A
-2. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
+1. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
    terminator, neither of which is mine to choose. See Blocked.
 
 ## Blocked / waiting
@@ -108,7 +105,7 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 | 7.1  Backtester | B | 7 | done | `fbf81ce` · 43 tests, all in the per-commit suite (+0.67s) · **5 of 5 criteria** · `test_two_runs_of_one_manifest_are_byte_identical`, `test_the_strategy_is_handed_one_bar_at_a_time_and_never_a_series`, `test_every_fill_pays_the_takers_fee_from_the_ledger_not_a_local_copy` |
 | 7.2  Backtest screen | B | 7 | done | `3941931` · 27 tests (16 gateway, 11 web) · criterion 2 by test; criterion 1's server half verified live, browser half not — see Deviations · `tests/web/` + `tests/backtest/` 129 pass on `6485c50` · includes the `/backtests` endpoint, Dev B's by the 2026-09-09 decision |
 | 7.3  Integration tests (T5, thinned) | B | 7 | done | `18e63db` · `tests/integration/`, 4 tests · **2 of 2 criteria** · criterion 2 demonstrated by breaking the stack: `stop ledger` names the ledger, `stop matcher` names the matcher |
-| 7.5  Definition-of-done walk | AB | 7 | todo | — |
+| 7.5  Definition-of-done walk | ~~AB~~ B | 7 | done | `8479f3e` · **4 of 4 criteria** · `scripts/backup_postgres.sh`, `RUNBOOK.md`, `DEFINITION_OF_DONE.md` (30 pass, 4 partial, 1 fail with stated misses), `README.md` rewrite |
 
 **Vocabulary.**
 
@@ -128,6 +125,7 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 
 | Date | Decision | Why | Amends |
 |---|---|---|---|
+| 2026-09-16 | **Dev B takes over 7.5** | Executed solo per explicit user direction to close Phase 1 deliverables | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
 | 2026-09-16 | **Dev B takes over 7.4** | Dev A's 7.4 was `A:unknown` since 05 Sep and blocked the joint 7.5. Your call, made explicitly rather than drifted into | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
 | 2026-09-16 | **Private frames are handed to the writer when offered, not on the conflation tick** | OI 006 exempts private data from conflation; the implementation honoured that as "never dropped" while still making it wait a uniform 0–50 ms for a tick. Measured: ptail p50 ~32 ms → ~3.4 ms, 5.2's criteria 1 and 5 re-verified | implements OI 006 as written |
 | 2026-09-16 | **A known-biased metric is deleted, not annotated** | `bench_e2e`'s `book_delay` timed a frame against its own `seq`, which is the newest record folded in — it read 5–9 ms against a 50 ms window. A wrong number left in a tool's output gets quoted eventually | — |
