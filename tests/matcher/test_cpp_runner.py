@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from redis.asyncio import Redis
@@ -256,6 +257,7 @@ async def test_cpp_matcher_recovers_without_duplicate_outbound_records(
     await input_producer.stop()
 
     first = CppMatcher(redis, settings)
+    await first.engine.start()
     first.producer.start()
     while await first.step():
         pass
@@ -286,3 +288,26 @@ async def test_cpp_matcher_recovers_without_duplicate_outbound_records(
     assert [type(record).__name__ for record in before] == [
         "ReplayConfigured", "OrderAccepted", "OrderAccepted", "Fill"
     ]
+
+
+async def test_cpp_matcher_recovers_before_resuming_after_a_failed_cycle(settings):
+    """A transient Redis error cannot permanently end the background matcher task."""
+    matcher = CppMatcher(object(), settings)
+    calls: list[str] = []
+
+    async def step() -> int:
+        calls.append("step")
+        if len(calls) == 1:
+            raise ConnectionError("Redis restarting")
+        matcher._stop.set()
+        return 1
+
+    async def recover() -> int:
+        calls.append("recover")
+        return 0
+
+    matcher.step = AsyncMock(side_effect=step)
+    matcher.recover = AsyncMock(side_effect=recover)
+    await matcher.run()
+
+    assert calls == ["step", "recover", "step"]

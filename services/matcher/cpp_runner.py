@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import struct
 import time
@@ -146,7 +147,6 @@ class CppMatcher:
             self.last_recovery_seconds = time.perf_counter() - started
 
     async def step(self) -> int:
-        await self.engine.start()
         batch = await self._read(
             self.settings.stream_inbound,
             self.last_inbound_id,
@@ -161,15 +161,40 @@ class CppMatcher:
 
     async def run(self) -> None:
         while not self._stop.is_set():
-            handled = await self.step()
-            if not handled:
-                await asyncio.sleep(0.01)
+            try:
+                handled = await self.step()
+                if not handled:
+                    await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                break
+            except Exception:  # noqa: BLE001 -- a failed cycle leaves C++ state uncertain
+                # A failure can occur after the child has applied an input but before its
+                # anchor was durably appended. Retrying the live tail would then apply that
+                # input twice. Reconcile from durable anchors before consuming again; this
+                # also replaces a child that died without resetting order ids or the book.
+                logging.getLogger(__name__).exception("cpp matcher step failed; recovering")
+                while not self._stop.is_set():
+                    try:
+                        replayed = await self.recover()
+                    except asyncio.CancelledError:
+                        return
+                    except Exception:  # noqa: BLE001 -- Redis may still be restarting
+                        logging.getLogger(__name__).exception("cpp matcher recovery failed")
+                        await asyncio.sleep(0.1)
+                    else:
+                        logging.getLogger(__name__).info(
+                            "cpp matcher recovered %d inbound records; resuming at %s",
+                            replayed,
+                            self.last_inbound_id,
+                        )
+                        break
 
     async def start(self) -> None:
-        await self.engine.start()
-        self.producer.start()
-        self._stop.clear()
-        self._task = asyncio.create_task(self.run(), name="cpp-matcher")
+        if self._task is None:
+            await self.engine.start()
+            self.producer.start()
+            self._stop.clear()
+            self._task = asyncio.create_task(self.run(), name="cpp-matcher")
 
     async def stop(self) -> None:
         self._stop.set()
