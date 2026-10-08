@@ -18,7 +18,7 @@ from redis.asyncio import Redis
 
 from config.settings import settings as default_settings
 from config.startup import log_startup
-from contracts.v1.generated.contracts import unpack_any
+from contracts.v1.generated.contracts import ConfigureReplay, unpack_any
 from services.gateway.streams import HaltState, StreamProducer, read_records, watch_health
 from services.matcher.runner import is_anchor
 
@@ -118,10 +118,26 @@ class CppMatcher:
                 anchors += is_anchor(item.record)
                 last_id = item.stream_id
 
+    async def _require_faithful_replay_start(self, *, stream: str, expected: type) -> None:
+        """Fail loudly when a retained stream no longer begins at the original genesis record."""
+        batch = await self._read(stream, "0-0", block_ms=20)
+        if not batch:
+            raise RuntimeError(f"{stream} has no retained records; cannot recover from an empty stream")
+        first = batch[0].record
+        if not isinstance(first, expected):
+            raise RuntimeError(
+                f"{stream} no longer begins at genesis; first retained record is "
+                f"{type(first).__name__}, expected {expected.__name__}"
+            )
+
     async def recover(self) -> int:
         """Rebuild the C++ process from answered inbound records without appending outputs."""
         started = time.perf_counter()
         try:
+            await self._require_faithful_replay_start(
+                stream=self.settings.stream_inbound,
+                expected=ConfigureReplay,
+            )
             already_answered = await self._count_anchors()
             await self.engine.stop()
             self.engine = CppEngineProcess(initial_cash_ticks=self.settings.initial_cash_ticks)

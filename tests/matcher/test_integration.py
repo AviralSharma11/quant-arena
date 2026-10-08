@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from redis.asyncio import Redis
@@ -54,13 +55,30 @@ def submit(*, coid, user, side, price, qty, symbol=1, tif=int(Tif.GTC), ts=1) ->
 
 
 async def feed(settings: Settings, records, redis: Redis | None = None) -> Redis:
-    """Put records on the inbound stream the way the gateway does — one batching producer."""
+    """Put records on the inbound stream the way the gateway does — one batching producer.
+
+    The live exchange always emits a `ConfigureReplay` record at the start of the stream so a
+    restart can detect a trimmed replay. Legacy tests that omit this marker are upgraded in-place
+    here rather than changing every workload by hand.
+    """
     redis = redis or Redis.from_url(settings.redis_url, decode_responses=False)
+    payload = list(records)
+    if not payload or not isinstance(payload[0], ConfigureReplay):
+        payload.insert(
+            0,
+            ConfigureReplay.new(
+                timestamp_ns=0,
+                client_order_id=0,
+                real_seconds_per_simulated_minute=1,
+                config_hash_hi=0,
+                config_hash_lo=0,
+            ),
+        )
     producer = StreamProducer(
         redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=settings.stream_batch_max
     )
     producer.start()
-    for record in records:
+    for record in payload:
         await producer.append(settings.stream_inbound, record)
     await producer.stop()
     return redis
@@ -100,7 +118,7 @@ async def test_a_crossing_pair_produces_one_fill_on_the_outbound_stream(
     records = await outbound(redis, settings)
     await redis.aclose()
 
-    assert [type(r).__name__ for r in records] == ["OrderAccepted", "OrderAccepted", "Fill"]
+    assert [type(r).__name__ for r in records] == ["ReplayConfigured", "OrderAccepted", "OrderAccepted", "Fill"]
     fill = records[-1]
     assert fill.maker_order_id == 1 and fill.taker_order_id == 2
     assert fill.price_ticks == 100 and fill.qty == 5
@@ -144,6 +162,28 @@ async def test_replay_configuration_is_ordered_and_recovered_once(
     assert replayed_config.config_hash_lo == 22
 
 
+async def test_recovery_fails_loudly_when_the_inbound_stream_has_been_trimmed():
+    settings = Settings.load()
+    matcher = Matcher(object(), settings)
+    first = submit(coid=1, user=10, side=BUY, price=100, qty=5, ts=2)
+    later = ConfigureReplay.new(
+        timestamp_ns=5,
+        client_order_id=0,
+        real_seconds_per_simulated_minute=1,
+        config_hash_hi=11,
+        config_hash_lo=22,
+    )
+    matcher._read = AsyncMock(
+        side_effect=[
+            [type("Item", (), {"record": first})()],
+            [type("Item", (), {"record": later})()],
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="begins at genesis"):
+        await matcher.recover()
+
+
 async def test_the_gateway_writes_and_the_matcher_answers(settings: Settings, clean_redis):
     """The gateway's own append path, consumed by the matcher — the seam itself.
 
@@ -159,8 +199,8 @@ async def test_the_gateway_writes_and_the_matcher_answers(settings: Settings, cl
     records = await outbound(redis, settings)
     await redis.aclose()
 
-    assert len(records) == 1
-    accepted = records[0]
+    assert len(records) == 2
+    accepted = records[1]
     assert isinstance(accepted, OrderAccepted)
     assert accepted.client_order_id == 7 and accepted.user_id == 42
     # Engine-assigned, and the gateway could not have known it at append time.
@@ -213,7 +253,7 @@ async def test_restarting_the_matcher_rebuilds_the_book_and_re_emits_nothing(
     second = Matcher(redis, settings)
     replayed = await second.recover()
 
-    assert replayed == 3
+    assert replayed == 4
     assert second.matcher.resting() == book_before
     assert second.matcher.next_order_id == first.matcher.next_order_id
 
@@ -230,8 +270,8 @@ async def test_restarting_the_matcher_rebuilds_the_book_and_re_emits_nothing(
     await redis.aclose()
 
     new_records = after[len(before):]
-    assert [type(r).__name__ for r in new_records] == ["OrderAccepted", "Fill"]
-    assert new_records[0].order_id == 4
+    assert [type(r).__name__ for r in new_records] == ["ReplayConfigured", "OrderAccepted", "Fill"]
+    assert new_records[1].order_id == 4
 
 
 async def test_recovery_after_a_crash_mid_stream_answers_the_unanswered_records(
@@ -260,7 +300,7 @@ async def test_recovery_after_a_crash_mid_stream_answers_the_unanswered_records(
     await redis.aclose()
 
     # Exactly one accepted per order, and exactly one fill. Nothing replayed twice.
-    assert [type(r).__name__ for r in records] == ["OrderAccepted", "OrderAccepted", "Fill"]
+    assert [type(r).__name__ for r in records] == ["ReplayConfigured", "OrderAccepted", "OrderAccepted", "Fill"]
     assert len([r for r in records if isinstance(r, Fill)]) == 1
 
 
