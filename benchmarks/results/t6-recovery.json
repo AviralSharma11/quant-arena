@@ -1,0 +1,15 @@
+{
+  "recorded_at": "2026-10-08T09:42:45.120290+00:00",
+  "platform": "Windows-11-10.0.22631-SP0",
+  "python": "3.13.0",
+  "docker_version": "29.7.2",
+  "orders": 100,
+  "symbol": "QAA",
+  "replayed_inbound_records": 49,
+  "kill_to_recovery_seconds": 3.831725,
+  "restart_to_replay_seconds": 2.976994,
+  "fills": 100,
+  "duplicate_fills": 0,
+  "cash_plus_fees_ticks": 20000000000,
+  "cash_conservation_passed": true
+}
