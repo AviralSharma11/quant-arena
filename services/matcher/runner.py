@@ -45,6 +45,7 @@ from contracts.v1.generated.contracts import (
     AccountCreated,
     CancelReason,
     CashCredited,
+    ConfigureReplay,
     ReplayConfigured,
     OrderAccepted,
     OrderCancelled,
@@ -104,6 +105,18 @@ class Matcher:
 
     # -- recovery ------------------------------------------------------------------------------
 
+    async def _require_faithful_replay_start(self, *, stream: str, expected: type) -> None:
+        """Fail loudly when a retained stream no longer begins at the original genesis record."""
+        batch = await self._read(stream, "0-0", block_ms=20)
+        if not batch:
+            raise RuntimeError(f"{stream} has no retained records; cannot recover from an empty stream")
+        first = batch[0].record
+        if not isinstance(first, expected):
+            raise RuntimeError(
+                f"{stream} no longer begins at genesis; first retained record is "
+                f"{type(first).__name__}, expected {expected.__name__}"
+            )
+
     async def _count_anchors(self) -> int:
         last_id, anchors = "0-0", 0
         while True:
@@ -121,6 +134,10 @@ class Matcher:
         """
         started = time.perf_counter()
         try:
+            await self._require_faithful_replay_start(
+                stream=self.settings.stream_inbound,
+                expected=ConfigureReplay,
+            )
             already_answered = await self._count_anchors()
             self.matcher = self._new_matcher()
             self.records_answered = 0
@@ -132,7 +149,10 @@ class Matcher:
                     # The outbound stream claims more answers than the inbound stream has records.
                     # Only trimming can do that, and rebuilding past a trim point is not something
                     # to paper over silently — Phase 1 replays the whole retained stream or fails.
-                    break
+                    raise RuntimeError(
+                        "outbound anchors exceed retained inbound records; "
+                        "cannot recover the matcher safely after a trimmed replay"
+                    )
                 for item in batch:
                     if replayed >= already_answered:
                         break
