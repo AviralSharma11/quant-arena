@@ -132,6 +132,24 @@ Quant Arena benchmarks performance honestly using **open-loop load testing** to 
 
 Full benchmark report: [`benchmarks/results/7.4-benchmark-report.md`](benchmarks/results/7.4-benchmark-report.md)
 
+### Engine crash recovery (T6)
+
+Run the end-to-end recovery demonstration on an isolated Compose project. It chooses separate
+host ports, creates scratch database/stream volumes, drives orders through the gateway, kills and
+restarts the matcher during the flow, then checks fills and cash conservation. It removes only its
+own project and volumes on exit.
+
+```bash
+python scripts/recovery_t6.py
+```
+
+The successful run records a measurement in
+[`benchmarks/results/t6-recovery.json`](benchmarks/results/t6-recovery.json) and creates the
+animated walkthrough below. To prove the trimmed-history guard rejects a broken replay, run
+`python scripts/recovery_t6.py --negative-control`; that deliberate fault exits non-zero.
+
+![Task 5.3 matcher crash recovery](benchmarks/results/t6-recovery.gif)
+
 ### Key Performance Findings
 
 ```

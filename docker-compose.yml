@@ -25,7 +25,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "6379:6379"          # exposed so the test suite can run on the host against this stack
+      - "${QA_REDIS_PUBLISHED_PORT:-6379}:6379" # exposed so host tests can reach this stack
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -42,7 +42,7 @@ services:
       POSTGRES_PASSWORD: ${QA_POSTGRES_PASSWORD:-quant}
       POSTGRES_DB: quant_arena
     ports:
-      - "5432:5432"
+      - "${QA_POSTGRES_PUBLISHED_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -70,7 +70,7 @@ services:
       # http. Task 3.3 turns this back on behind TLS.
       QA_SESSION_COOKIE_SECURE: "false"
     ports:
-      - "8000:8000"
+      - "${QA_GATEWAY_PUBLISHED_PORT:-8000}:8000"
     healthcheck:
       test:
         - CMD
@@ -170,7 +170,7 @@ services:
       # PostgreSQL read model. Sessions are in Redis (Open Issue 015), so authentication needs
       # no database either.
     ports:
-      - "8001:8001"
+      - "${QA_FANOUT_PUBLISHED_PORT:-8001}:8001"
     # Unlike the matcher and the ledger, this one has an HTTP surface, so liveness is a real
     # question rather than "the process is up": /health carries the stream position and the
     # tick count, which is what says the feed is actually moving.
