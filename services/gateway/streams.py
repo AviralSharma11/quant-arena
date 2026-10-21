@@ -115,6 +115,42 @@ class _Pending(NamedTuple):
     stream: str
     payload: bytes
     future: asyncio.Future
+    #: Set for an idempotent append: the key is claimed and the record appended by one script.
+    idempotency_key: str | None = None
+    outcome_ttl_seconds: int = 0
+
+
+class ClaimedAppend(NamedTuple):
+    """What `claim_and_append` did: appended (`stream_id` set) or found a duplicate."""
+
+    stream_id: str | None
+    #: The outcome already stored under the key, raw, when this was a duplicate.
+    existing: str | None
+
+
+#: Open Issue 008's claim-and-append, as one script so Redis runs it as one step.
+#:
+#: KEYS[1] = idempotency key · KEYS[2] = stream
+#: ARGV[1] = record field · ARGV[2] = packed record · ARGV[3] = outcome TTL in seconds
+#:
+#: Returns {0, stored outcome} when the key exists — nothing is appended — or {1, stream id}
+#: after appending and storing the accepted outcome under the key. There is no moment at which
+#: the order is on the stream and the key is not, which is what makes a retry after a lost
+#: reply safe: it finds the outcome rather than appending a second order. `appendfsync always`
+#: persists a script's writes as one unit.
+CLAIM_AND_APPEND_SCRIPT = """
+local existing = redis.call('GET', KEYS[1])
+if existing then
+    return {0, existing}
+end
+local id = redis.call('XADD', KEYS[2], '*', ARGV[1], ARGV[2])
+redis.call('SET', KEYS[1], '{"status":"accepted","seq":"' .. id .. '"}', 'EX', tonumber(ARGV[3]))
+return {1, id}
+"""
+
+
+def _text(value) -> str:
+    return value.decode() if isinstance(value, bytes) else value
 
 
 class StreamProducer:
@@ -172,9 +208,33 @@ class StreamProducer:
             # while every order silently never returns.
             self._halt.halt(HaltReason.PRODUCER_STOPPED, "stream producer is not running")
             raise ExchangeHalted(HaltReason.PRODUCER_STOPPED)
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        await self._queue.put(_Pending(stream, record.pack(), future))
-        return await future
+        return await self._enqueue(_Pending(stream, record.pack(), self._future()))
+
+    async def claim_and_append(
+        self, stream: str, record, *, idempotency_key: str, outcome_ttl_seconds: int
+    ) -> ClaimedAppend:
+        """Claim `idempotency_key` and append `record` atomically, or report the duplicate.
+
+        Queued and flushed with every other append, so group commit is kept: a burst of orders
+        is still one pipeline, each a script call instead of a bare `XADD`.
+        """
+        return await self._enqueue(
+            _Pending(
+                stream,
+                record.pack(),
+                self._future(),
+                idempotency_key=idempotency_key,
+                outcome_ttl_seconds=outcome_ttl_seconds,
+            )
+        )
+
+    @staticmethod
+    def _future() -> asyncio.Future:
+        return asyncio.get_running_loop().create_future()
+
+    async def _enqueue(self, pending: _Pending):
+        await self._queue.put(pending)
+        return await pending.future
 
     @staticmethod
     def _fail(batch: list[_Pending], exc: BaseException) -> None:
@@ -225,6 +285,17 @@ class StreamProducer:
         try:
             pipe = self._redis.pipeline(transaction=False)
             for item in batch:
+                if item.idempotency_key is not None:
+                    pipe.eval(
+                        CLAIM_AND_APPEND_SCRIPT,
+                        2,
+                        item.idempotency_key,
+                        item.stream,
+                        RECORD_FIELD,
+                        item.payload,
+                        item.outcome_ttl_seconds,
+                    )
+                    continue
                 # No MAXLEN in production: streams are trimmed below the oldest checkpoint by
                 # `services.checkpoint.trim` (Open Issue 020). A length cap is kept for tests
                 # and benchmarks that want a bounded scratch stream.
@@ -234,7 +305,9 @@ class StreamProducer:
                     maxlen=self._maxlen,
                     approximate=True,
                 )
-            ids = await pipe.execute()
+            # Per-command results: one failed script must not fail the appends beside it,
+            # which Redis has already applied.
+            ids = await pipe.execute(raise_on_error=False)
         except UNREACHABLE as exc:
             self._halt.halt(HaltReason.REDIS_UNREACHABLE, str(exc))
             for item in batch:
@@ -248,11 +321,18 @@ class StreamProducer:
         self.batches_flushed += 1
         self.records_written += len(batch)
         self.max_batch = max(self.max_batch, len(batch))
-        for item, stream_id in zip(batch, ids):
-            if not item.future.done():
+        for item, result in zip(batch, ids):
+            if item.future.done():
+                continue
+            if isinstance(result, Exception):
+                item.future.set_exception(result)
+            elif item.idempotency_key is not None:
+                appended, value = result
                 item.future.set_result(
-                    stream_id.decode() if isinstance(stream_id, bytes) else stream_id
+                    ClaimedAppend(_text(value), None) if appended else ClaimedAppend(None, _text(value))
                 )
+            else:
+                item.future.set_result(_text(result))
         # Defensive: a short reply must not leave anyone waiting forever.
         if len(ids) < len(batch):
             self._fail(

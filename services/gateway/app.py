@@ -18,6 +18,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -28,6 +29,7 @@ from config.startup import log_startup
 from contracts.v1.generated.contracts import ConfigureReplay
 from services import checkpoint
 from services.gateway import models  # noqa: F401  — registers tables on SQLModel.metadata
+from services.gateway.models import WIDEN_CLIENT_ORDER_ID
 from services.gateway.idempotency import IdempotencyStore
 from services.gateway.ratelimit import RateLimiter
 from services.gateway.risk import RiskState
@@ -78,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db = create_async_engine(settings.database_url, pool_pre_ping=True)
         async with db.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
+            await conn.execute(text(WIDEN_CLIENT_ORDER_ID))
 
         app.state.settings = settings
         # Task 1.4 criterion 3: the configuration hash appears in every process's startup log.
