@@ -30,7 +30,7 @@ from contracts.v1.generated.contracts import (
     Tif,
 )
 from services.gateway.app import create_app
-from services.gateway.risk import Reservation, RiskState
+from services.gateway.risk import Reservation, RiskState, buy_cost
 
 BUY, SELL = int(Side.BUY), int(Side.SELL)
 GRANT = 1_000_000
@@ -117,7 +117,7 @@ def test_a_cancelled_buy_still_returns_its_cash():
     state = _funded(1)
     state.reserve(user_id=1, client_order_id=1, symbol_id=1, side=BUY, price_ticks=1_000, qty=10)
     state.apply(_accepted(1, user_id=1, side=BUY, price=1_000, qty=10))
-    assert state.available_cash(1) == GRANT - 10_000
+    assert state.available_cash(1) == GRANT - buy_cost(1_000, 10)
 
     state.apply(OrderCancelled.new(
         timestamp_ns=0, order_id=1, client_order_id=1, user_id=1,
