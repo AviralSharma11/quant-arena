@@ -88,7 +88,8 @@ offline plots (012, 019).
 
 **Stack — closed list.** FastAPI + uvicorn · SQLModel + PostgreSQL · Redis · C++20 + CMake +
 Catch2 · pytest + Hypothesis · TypeScript + Vite + React + react-router-dom · TradingView
-Lightweight Charts · Parquet (pyarrow) · Docker Compose · GitHub Actions. **A dependency
+Lightweight Charts · Parquet (pyarrow) · Docker Compose · GitHub Actions · Caddy (TLS and static
+files, public deployment only, 3.3). **A dependency
 outside this list needs my approval before you add it.**
 
 To change any of the above, say so explicitly and amend both the open issue and this file.
