@@ -122,16 +122,25 @@ real_seconds_per_simulated_minute = 1
 # days each — 10,080 minutes, which at the ratio above is about 2.8 hours before the loop wraps.
 data_sha256 = "7e25a04501f6ea306e5119d6cce14ea12ad928b1eff411784a1ab579e0a1fd09"
 
+[checkpoint]
+# Open Issue 020. Every process that rebuilds by replay saves its state and the stream ids it
+# reflects; a restart replays only the tail. Streams are trimmed below the oldest checkpoint among
+# their readers — never by a fixed MAXLEN, which is what let a restart replay a partial history
+# and fork the engine on 2026-09-16. A reader that has never checkpointed pins its stream
+# untrimmed.
+interval_ms = 30000
+trim_interval_ms = 10000
+# Every process that reads each stream and must be able to resume. A process added here that
+# never writes a checkpoint stops trimming entirely, which is the safe failure.
+inbound_readers = ["matcher"]
+outbound_readers = ["matcher", "gateway", "ledger", "fanout", "archiver"]
+
 [streams]
 # The durable ordered log. Open Issue 003: Redis Streams, and the stream ID *is* the sequence
 # number — never a parallel counter.
 inbound = "qa.inbound"
 outbound = "qa.outbound"
 
-# MAXLEN ~ trimming. Two million entries, not the 5–10 M in Open Issue 003 section 8.4: that
-# figure predates the no-snapshots decision, and both Open Issue 002 and Open Issue 004 settle
-# on ~2 M, where replaying from the start of the stream takes on the order of ten seconds.
-maxlen = 2000000
 
 # Group commit. The producer drains everything queued while the previous flush was in flight and
 # writes it as one pipeline, so `appendfsync always` costs one fsync per batch rather than one

@@ -43,6 +43,48 @@ def test_the_hash_is_stable_across_loads():
     assert Settings.load().config_hash == Settings.load().config_hash
 
 
+# --- checkpoint_hash: which checkpoints survive a configuration change (Open Issue 020) -------
+
+
+def _edited(tmp_path: Path, name: str, old: str, new: str) -> Settings:
+    original = DEFAULT_CONFIG_PATH.read_text()
+    assert old in original, f"fixture text {old!r} is no longer in the config file"
+    path = tmp_path / name
+    path.write_text(original.replace(old, new, 1))
+    return Settings.load(path)
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("[exchange]", "# a new comment\n[exchange]"),
+        ("interval_ms = 30000", "interval_ms = 60000"),
+        ("max_orders_per_second = 1000", "max_orders_per_second = 500"),
+        ("conflation_hz = 20", "conflation_hz = 10"),
+    ],
+)
+def test_a_change_that_shapes_no_state_keeps_every_checkpoint(tmp_path: Path, old, new):
+    """On a trimmed stream a discarded checkpoint leaves a process unable to start, so a
+    comment or a tuning change must not discard them."""
+    edited = _edited(tmp_path, "edited.toml", old, new)
+    assert edited.config_hash != Settings.load().config_hash
+    assert edited.checkpoint_hash == Settings.load().checkpoint_hash
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("initial_cash_ticks = 10_000_000_000", "initial_cash_ticks = 20_000_000_000"),
+        ("tick_size_ticks = 100", "tick_size_ticks = 10"),
+        ("real_seconds_per_simulated_minute = 1", "real_seconds_per_simulated_minute = 2"),
+        ('inbound = "qa.inbound"', 'inbound = "qa.inbound2"'),
+    ],
+)
+def test_a_change_that_shapes_replayed_state_invalidates_checkpoints(tmp_path: Path, old, new):
+    edited = _edited(tmp_path, "edited.toml", old, new)
+    assert edited.checkpoint_hash != Settings.load().checkpoint_hash
+
+
 # --- values, each traceable to a decision ----------------------------------------------------
 
 
@@ -85,10 +127,14 @@ _MINIMAL_CONFIG = """
     [replay]
     real_seconds_per_simulated_minute = 1
     data_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+    [checkpoint]
+    interval_ms = 1000
+    trim_interval_ms = 1000
+    inbound_readers = ["matcher"]
+    outbound_readers = ["matcher"]
     [streams]
     inbound = "in"
     outbound = "out"
-    maxlen = 10
     batch_max = 10
     health_poll_ms = 500
     [[symbols.listed]]

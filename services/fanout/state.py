@@ -23,6 +23,8 @@ has no opinion about, which is how the schema is expected to evolve.
 
 from __future__ import annotations
 
+import json
+
 from contracts.v1.generated.contracts import (
     Fill,
     OrderAccepted,
@@ -30,7 +32,7 @@ from contracts.v1.generated.contracts import (
     Side,
 )
 from services.fanout.bars import Bar, BarSet, Tape, Trade
-from services.fanout.book import Book
+from services.fanout.book import Book, RestingOrder
 
 BUY, SELL = int(Side.BUY), int(Side.SELL)
 
@@ -139,6 +141,54 @@ class MarketState:
         for bar_set in self.bars.values():
             for builder in bar_set.builders.values():
                 builder.flush()
+
+    # -- checkpoint (Open Issue 020) -----------------------------------------------------------
+
+    def dump_state(self) -> bytes:
+        """Books and open bars as of `last_seq`. Undelivered tape prints and closed bars are
+        left out: they are in-flight output, not state, and the conflation tick owns them."""
+        return json.dumps(
+            {
+                "last_seq": self.last_seq,
+                "records_applied": self.records_applied,
+                "trades": self.tape.total,
+                "books": sorted(
+                    [symbol_id, sorted(book.resting())] for symbol_id, book in self.books.items()
+                ),
+                "bars": sorted(
+                    [symbol_id, width, [bar.bar_open_ns, bar.open_ticks, bar.high_ticks,
+                                        bar.low_ticks, bar.close_ticks, bar.volume]]
+                    for symbol_id, bar_set in self.bars.items()
+                    for width, builder in bar_set.builders.items()
+                    if (bar := builder.current) is not None
+                ),
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    def load_state(self, data: bytes) -> None:
+        raw = json.loads(data)
+        self.last_seq = raw["last_seq"]
+        self.records_applied = raw["records_applied"]
+        self.tape.total = raw["trades"]
+        self.books = {}
+        for symbol_id, resting in raw["books"]:
+            book = self.book(symbol_id)
+            for order_id, side, price_ticks, remaining_qty in resting:
+                book.orders[order_id] = RestingOrder(
+                    order_id=order_id, side=side, price_ticks=price_ticks, remaining_qty=remaining_qty
+                )
+        self.bars = {}
+        for symbol_id, width, fields in raw["bars"]:
+            builder = self.bar_set(symbol_id).builders.get(width)
+            if builder is None:
+                continue  # a width no longer configured — config changes also void checkpoints
+            open_ns, open_t, high_t, low_t, close_t, volume = fields
+            builder.current = Bar(
+                symbol_id=symbol_id, bucket_seconds=width, bar_open_ns=open_ns, open_ticks=open_t,
+                high_ticks=high_t, low_ticks=low_t, close_ticks=close_t, volume=volume,
+            )
+        self.dirty = set(self.books)
 
     # -- introspection --------------------------------------------------------------------------
 

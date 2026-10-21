@@ -39,6 +39,7 @@ account and symbol.**
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 
 from contracts.v1.generated.contracts import (
@@ -104,6 +105,54 @@ class RiskState:
             )
             state.market_makers = {user.id for user in users.all()}
         return state
+
+    # -- checkpoint (Open Issue 020) -----------------------------------------------------------
+
+    def dump_state(self) -> bytes:
+        """State as of `last_seq`, for the gateway's checkpoint. Synchronous on purpose: nothing
+        can interleave, so the dump is one consistent moment.
+
+        **In-flight orders are left out, and their commitments with them.** A reservation in
+        `pending_by_client` was taken for an order whose `OrderAccepted` is after `last_seq`.
+        On restore that record is replayed with no pending entry, and `apply` re-reserves it —
+        so keeping it here as well would reserve the same cash twice. Market makers are left
+        out too: they are configuration, re-resolved from the database at every start.
+        """
+        reserved = dict(self.reserved)
+        reserved_qty = dict(self.reserved_qty)
+        for pending in self.pending_by_client.values():
+            if pending.side == int(Side.BUY):
+                reserved[pending.user_id] = reserved.get(pending.user_id, 0) - pending.price_ticks * pending.qty
+            else:
+                key = (pending.user_id, pending.symbol_id)
+                reserved_qty[key] = reserved_qty.get(key, 0) - pending.qty
+        return json.dumps(
+            {
+                "last_seq": self.last_seq,
+                "settled_cash": sorted(self.settled_cash.items()),
+                "reserved": sorted((u, v) for u, v in reserved.items() if v),
+                "positions": sorted([u, s, q] for (u, s), q in self.positions.items()),
+                "reserved_qty": sorted([u, s, q] for (u, s), q in reserved_qty.items() if q),
+                "open_orders": sorted(
+                    [r.user_id, r.order_id, r.client_order_id, r.symbol_id, r.side, r.price_ticks, r.qty]
+                    for r in self.open_orders.values()
+                ),
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    def load_state(self, data: bytes) -> None:
+        """Replace balances, commitments and resting orders; keep `market_makers`."""
+        raw = json.loads(data)
+        self.last_seq = raw["last_seq"]
+        self.settled_cash = {int(u): int(v) for u, v in raw["settled_cash"]}
+        self.reserved = {int(u): int(v) for u, v in raw["reserved"]}
+        self.positions = {(int(u), int(s)): int(q) for u, s, q in raw["positions"]}
+        self.reserved_qty = {(int(u), int(s)): int(q) for u, s, q in raw["reserved_qty"]}
+        self.pending_by_client = {}
+        self.open_orders = {
+            int(fields[1]): Reservation(*fields) for fields in raw["open_orders"]
+        }
 
     def best_ask(self, symbol_id: int) -> int | None:
         """Lowest resting sell for a symbol, or None when nothing is offered.

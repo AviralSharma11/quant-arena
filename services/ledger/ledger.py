@@ -15,7 +15,8 @@ Invariant I10 (extended cash conservation):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import astuple, dataclass
 from typing import Any
 
 from contracts.v1.generated.contracts import (
@@ -84,6 +85,39 @@ class Ledger:
         self.dirty_accounts: set[int] = set()
         self.dirty_positions: set[tuple[int, int]] = set()
         self.dirty_orders: set[int] = set()
+
+    # -- checkpoint (Open Issue 020) -----------------------------------------------------------
+
+    def dump_state(self) -> bytes:
+        """Everything `apply` derives, as canonical JSON. Two ledgers that applied the same
+        records dump identical bytes, which is how the checkpoint test compares them."""
+        return json.dumps(
+            {
+                "cash": sorted(self.cash_balances.items()),
+                "positions": sorted([u, s, q] for (u, s), q in self.positions.items()),
+                "open_orders": sorted(astuple(o) for o in self.open_orders.values()),
+                "house_fee_ticks": self.house_fee_ticks,
+                "total_deposits_ticks": self.total_deposits_ticks,
+                "last_seq": self.last_seq,
+                "events_processed": self.events_processed,
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    @classmethod
+    def load_state(cls, data: bytes) -> "Ledger":
+        raw = json.loads(data)
+        ledger = cls()
+        ledger.cash_balances = {int(u): int(c) for u, c in raw["cash"]}
+        ledger.positions = {(int(u), int(s)): int(q) for u, s, q in raw["positions"]}
+        ledger.open_orders = {
+            int(fields[0]): OpenOrderRecord(*fields) for fields in raw["open_orders"]
+        }
+        ledger.house_fee_ticks = raw["house_fee_ticks"]
+        ledger.total_deposits_ticks = raw["total_deposits_ticks"]
+        ledger.last_seq = raw["last_seq"]
+        ledger.events_processed = raw["events_processed"]
+        return ledger
 
     def take_dirty(self) -> tuple[set[int], set[tuple[int, int]], set[int]]:
         """Hand over and clear the keys changed since the previous call."""

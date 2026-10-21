@@ -17,6 +17,8 @@ ask, and whose work you must not start.
 - **Dev A** (134 h): 1.2, 2.3, 2.4, 3.4, 4.1, 4.2, 4.3, 5.3, 6.3, 6.4, 7.4
 - **Dev B** (234 h): 1.3, 1.4, 2.1, 2.2, 3.1, 3.2, 3.3, 4.4, 5.1, 5.2, 5.4, 6.1, 6.2, 7.1, 7.2, 7.3
 - **Joint**: 1.1 (contracts), 7.5 (definition-of-done walk)
+- **Checkpointing (020)** — taken over by Dev B on 2026-09-16, including Dev A's engine and
+  matcher changes it requires.
 
 You may read Dev A's output and depend on it. You may not implement it, refactor it, or "just
 quickly stub it out" beyond the one sanctioned stub below.
@@ -60,11 +62,14 @@ oracle, not scaffolding (001, 010). **nanobind, not pybind11** (002, 019).
 
 **Ordering and durability.** **Redis Streams** is the log. The memory-mapped log was assessed
 and rejected — it is Phase 3 (003, 009 §8). **The Redis stream ID *is* the sequence number** —
-never invent a parallel counter (003). The gateway is the single *producer* (007). **No
-snapshots, no checkpointing in Phase 1** — every consumer rebuilds by full replay of the
-retained stream. Slow recovery is a deliberate, measured Phase 2 baseline (018 §13.1).
+never invent a parallel counter (003). The gateway is the single *producer* (007).
+**Checkpointing is in Phase 1 (020, reversing 018 §13.1–13.2).** Each replaying process saves
+its state and the stream id it reflects; restart = load checkpoint + replay the tail. Streams
+trim by `MINID` below the oldest checkpoint, never by `MAXLEN`. A checkpoint older than the
+stream's start halts the process — never a partial replay.
 
-**Money.** Risk state lives in gateway **process memory**, not Redis (004). Order of operations
+**Money.** Risk state lives in gateway **process memory**, not Redis (004); its Redis checkpoint
+is a recovery aid, never read on the order path. Order of operations
 is **validate → reserve → atomic Lua claim-and-append → release on duplicate** (008).
 `client_order_id` is mandatory; two identifiers, client and engine (008). PostgreSQL is a
 **derived read model**, rebuildable from the stream, never the source of truth (004).
@@ -93,7 +98,7 @@ Never drift.
 
 **Phase 2** — user-submitted strategy code, sandboxed execution, competitions, margin and short
 selling, momentum/value bots, delta-encoded feeds, binary wire protocol, L3 feed, multiple
-gateways, analytics as a separate service, checkpointing and snapshots, engine-based backtest
+gateways, analytics as a separate service, engine-based backtest
 fills, email verification.
 **Phase 3** — memory-mapped log replacing Redis Streams, engine sharding, market-impact
 modelling, multi-region.

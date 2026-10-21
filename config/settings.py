@@ -19,6 +19,7 @@ default, and none can be set from the environment. The file is the only source.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tomllib
 from dataclasses import dataclass
@@ -177,6 +178,29 @@ def _bots(table: dict) -> BotSettings:
     )
 
 
+def _checkpoint_hash(table: dict) -> str:
+    """SHA-256 of the settings a checkpoint's state was built under, canonically encoded.
+
+    Included is what replay folds into state: the cash grant, the symbol table, the replay
+    clock and dataset, the bar widths that fan-out and the archiver hold open, and the stream
+    names that key every saved position. Change one of these and a checkpoint is no longer the
+    state this configuration would have produced, so it is not used. Everything else — limits,
+    sessions, bots, intervals, comments — is read fresh at startup and never saved.
+    """
+    shaping = {
+        "exchange": table["exchange"],
+        "replay": table["replay"],
+        "symbols": table["symbols"],
+        "bar_bucket_seconds": _require(table, "market_data", "bar_bucket_seconds"),
+        "streams": {
+            "inbound": _require(table, "streams", "inbound"),
+            "outbound": _require(table, "streams", "outbound"),
+        },
+    }
+    canonical = json.dumps(shaping, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 @dataclass(frozen=True)
 class Settings:
     # --- configuration: from the file, covered by config_hash -------------------------------
@@ -199,7 +223,10 @@ class Settings:
     replay_data_sha256: str
     stream_inbound: str
     stream_outbound: str
-    stream_maxlen: int
+    checkpoint_interval_ms: int
+    checkpoint_trim_interval_ms: int
+    checkpoint_inbound_readers: tuple[str, ...]
+    checkpoint_outbound_readers: tuple[str, ...]
     stream_batch_max: int
     stream_health_poll_ms: int
     symbols: tuple[Symbol, ...]
@@ -216,6 +243,11 @@ class Settings:
     # --- provenance --------------------------------------------------------------------------
     config_path: str
     config_hash: str
+    #: Which checkpoints this configuration can resume from (Open Issue 020). Narrower than
+    #: `config_hash` on purpose: it covers only what shapes replayed state, so a comment or a
+    #: tuning change does not discard every checkpoint — on a trimmed stream that would leave
+    #: no process able to start. See `_checkpoint_hash`.
+    checkpoint_hash: str
 
     @classmethod
     def load(cls, config_path: Path | str | None = None) -> "Settings":
@@ -250,7 +282,10 @@ class Settings:
             replay_data_sha256=_require(table, "replay", "data_sha256"),
             stream_inbound=_require(table, "streams", "inbound"),
             stream_outbound=_require(table, "streams", "outbound"),
-            stream_maxlen=_require(table, "streams", "maxlen"),
+            checkpoint_interval_ms=_require(table, "checkpoint", "interval_ms"),
+            checkpoint_trim_interval_ms=_require(table, "checkpoint", "trim_interval_ms"),
+            checkpoint_inbound_readers=tuple(_require(table, "checkpoint", "inbound_readers")),
+            checkpoint_outbound_readers=tuple(_require(table, "checkpoint", "outbound_readers")),
             stream_batch_max=_require(table, "streams", "batch_max"),
             stream_health_poll_ms=_require(table, "streams", "health_poll_ms"),
             symbols=_symbols(_require(table, "symbols", "listed")),
@@ -269,6 +304,7 @@ class Settings:
             in ("1", "true", "yes", "on"),
             config_path=str(path),
             config_hash=config_hash,
+            checkpoint_hash=_checkpoint_hash(table),
         )
 
 

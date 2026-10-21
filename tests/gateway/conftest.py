@@ -176,7 +176,6 @@ def _pump_impl(client: TestClient, settings: Settings):
                 last_out_id = r.xadd(
                     settings.stream_outbound,
                     {RECORD_FIELD: out.pack()},
-                    maxlen=settings.stream_maxlen,
                     approximate=True,
                 )
             cursor["inbound"] = raw_id.decode()

@@ -41,6 +41,8 @@ async def main() -> None:
     archiver = Archiver(redis, settings)
 
     resumed_from = archiver.resume()
+    await archiver.ensure_resumable()
+    await archiver.publish_position()
     logging.getLogger(LOGGER_NAME).info(
         '{"event":"archiver_resume","from":"%s","root":"%s"}',
         resumed_from,
