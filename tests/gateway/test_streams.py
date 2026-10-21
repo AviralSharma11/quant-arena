@@ -54,7 +54,7 @@ async def redis(settings):
 
 @pytest.fixture
 async def producer(redis, settings):
-    p = StreamProducer(redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=256)
+    p = StreamProducer(redis, HaltState(), batch_max=256)
     p.start()
     yield p
     await p.stop()
@@ -140,7 +140,7 @@ async def test_batching_preserves_order(redis, producer):
 async def test_a_batch_never_exceeds_batch_max(redis, settings):
     """Asserts the actual bound, not a lower bound on the number of flushes — the earlier
     version of this test would have passed with no limit enforced at all."""
-    p = StreamProducer(redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=8)
+    p = StreamProducer(redis, HaltState(), batch_max=8)
     p.start()
     try:
         await asyncio.gather(*(p.append(STREAM, _order(i)) for i in range(64)))
@@ -163,7 +163,7 @@ async def test_an_unexpected_error_fails_the_append_and_the_loop_survives(redis,
     class Boom(Exception):
         pass
 
-    p = StreamProducer(redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=8)
+    p = StreamProducer(redis, HaltState(), batch_max=8)
     p.start()
     try:
         with patch.object(type(redis), "pipeline", side_effect=Boom("unexpected")):
@@ -179,7 +179,7 @@ async def test_an_unexpected_error_fails_the_append_and_the_loop_survives(redis,
 
 async def test_appending_to_a_dead_producer_halts_rather_than_hanging(redis, settings):
     halt = HaltState()
-    p = StreamProducer(redis, halt, maxlen=settings.stream_maxlen, batch_max=8)
+    p = StreamProducer(redis, halt, batch_max=8)
     p.start()
     p._task.cancel()
     await asyncio.sleep(0.05)
@@ -193,7 +193,7 @@ async def test_appending_to_a_dead_producer_halts_rather_than_hanging(redis, set
 async def test_stopping_the_producer_answers_everything_still_queued(redis, settings):
     """Shutdown must not strand a request either."""
     halt = HaltState()
-    p = StreamProducer(redis, halt, maxlen=settings.stream_maxlen, batch_max=1)
+    p = StreamProducer(redis, halt, batch_max=1)
     p.start()
     pending = [asyncio.create_task(p.append(STREAM, _order(i))) for i in range(20)]
     await asyncio.sleep(0)
@@ -237,9 +237,20 @@ async def test_reading_forward_from_the_last_id_consumes_each_record_once(redis,
 # --- trimming --------------------------------------------------------------------------------
 
 
-async def test_maxlen_trimming_is_applied(redis):
-    """MAXLEN ~ keeps the stream bounded. Streams are RAM-resident (Open Issue 003 §8.4), so
-    an untrimmed stream is a slow memory leak rather than an immediate failure."""
+async def test_the_production_producer_never_trims(redis):
+    """Open Issue 020: a length cap on XADD is what let a restart replay a partial history. The
+    default producer appends without MAXLEN; `services.checkpoint.trim` owns trimming."""
+    p = StreamProducer(redis, HaltState(), batch_max=4)
+    p.start()
+    try:
+        await asyncio.gather(*(p.append(STREAM, _order(i)) for i in range(200)))
+        assert await redis.xlen(STREAM) == 200
+    finally:
+        await p.stop()
+
+
+async def test_an_explicit_maxlen_still_bounds_a_scratch_stream(redis):
+    """Kept for benchmarks, which run on a scratch stream and want it bounded."""
     p = StreamProducer(redis, HaltState(), maxlen=10, batch_max=4)
     p.start()
     try:
@@ -271,7 +282,7 @@ def test_halt_records_when_it_started_and_clears_completely():
 async def test_appending_while_halted_raises_rather_than_queueing(redis, settings):
     halt = HaltState()
     halt.halt(HaltReason.REDIS_UNREACHABLE, "down")
-    p = StreamProducer(redis, halt, maxlen=settings.stream_maxlen, batch_max=8)
+    p = StreamProducer(redis, halt, batch_max=8)
     p.start()
     try:
         with pytest.raises(ExchangeHalted):

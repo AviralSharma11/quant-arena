@@ -54,6 +54,7 @@ from contracts.v1.generated.contracts import (
 from engine.naive_model import Order as ModelOrder
 from engine.naive_model import OrderBook as ModelBook
 from engine.naive_model import Side as ModelSide
+from services.matcher.snapshot import EngineSnapshot, SnapshotOrder
 
 #: Outbound records are `NamedTuple`s with no common base, so the union is spelled out.
 Outbound = (
@@ -134,6 +135,63 @@ class NaiveMatcher:
             (o.order_id, o.symbol_id, o.side, o.price_ticks, o.remaining_qty)
             for o in self._by_order_id.values()
         )
+
+    # -- snapshot (Open Issue 020) -------------------------------------------------------------
+
+    def snapshot(self) -> bytes:
+        """This matcher's state in the format the C++ worker also emits (`snapshot.py`)."""
+        return EngineSnapshot(
+            next_order_id=self._next_order_id,
+            orders=tuple(
+                SnapshotOrder(
+                    order_id=live.order_id,
+                    client_order_id=live.client_order_id,
+                    user_id=live.user_id,
+                    symbol_id=live.symbol_id,
+                    side=live.side,
+                    indexed=self._live.get((live.user_id, live.client_order_id)) is live,
+                    price_ticks=live.price_ticks,
+                    remaining_qty=live.remaining_qty,
+                    created_at_ns=live.model_order.created_at,
+                )
+                for live in self._by_order_id.values()
+            ),
+        ).pack()
+
+    @classmethod
+    def restore(cls, data: bytes, *, initial_cash_ticks: int = 0) -> "NaiveMatcher":
+        """A matcher that continues exactly where the snapshotted one stopped.
+
+        Orders are re-added in ascending `order_id`, which is arrival order, so every price
+        level's queue and every arrival comparison comes back as it was.
+        """
+        snap = EngineSnapshot.unpack(data)
+        matcher = cls(first_order_id=snap.next_order_id, initial_cash_ticks=initial_cash_ticks)
+        for o in snap.orders:
+            model_order = ModelOrder(
+                order_id=o.order_id,
+                user_id=o.user_id,
+                symbol=str(o.symbol_id),
+                side=_SIDE_TO_MODEL[o.side],
+                price=o.price_ticks,
+                quantity=o.remaining_qty,
+                created_at=o.created_at_ns,
+            )
+            live = _Live(
+                order_id=o.order_id,
+                client_order_id=o.client_order_id,
+                user_id=o.user_id,
+                symbol_id=o.symbol_id,
+                side=o.side,
+                price_ticks=o.price_ticks,
+                qty=o.remaining_qty,
+                model_order=model_order,
+            )
+            matcher.book(o.symbol_id).add_order(model_order)
+            matcher._by_order_id[o.order_id] = live
+            if o.indexed:
+                matcher._live[(o.user_id, o.client_order_id)] = live
+        return matcher
 
     # -- the one entry point -------------------------------------------------------------------
 

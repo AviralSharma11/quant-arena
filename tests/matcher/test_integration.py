@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from redis.asyncio import Redis
@@ -40,6 +39,9 @@ from services.gateway.streams import (  # noqa: E402
     StreamProducer,
     read_records,
 )
+from services import checkpoint  # noqa: E402
+from services.checkpoint import CheckpointRefused  # noqa: E402
+from services.matcher.checkpointing import PROCESS  # noqa: E402
 from services.matcher.runner import Matcher
 
 pytestmark = pytest.mark.anyio
@@ -75,7 +77,7 @@ async def feed(settings: Settings, records, redis: Redis | None = None) -> Redis
             ),
         )
     producer = StreamProducer(
-        redis, HaltState(), maxlen=settings.stream_maxlen, batch_max=settings.stream_batch_max
+        redis, HaltState(), batch_max=settings.stream_batch_max
     )
     producer.start()
     for record in payload:
@@ -162,26 +164,33 @@ async def test_replay_configuration_is_ordered_and_recovered_once(
     assert replayed_config.config_hash_lo == 22
 
 
-async def test_recovery_fails_loudly_when_the_inbound_stream_has_been_trimmed():
-    settings = Settings.load()
-    matcher = Matcher(object(), settings)
-    first = submit(coid=1, user=10, side=BUY, price=100, qty=5, ts=2)
-    later = ConfigureReplay.new(
-        timestamp_ns=5,
-        client_order_id=0,
-        real_seconds_per_simulated_minute=1,
-        config_hash_hi=11,
-        config_hash_lo=22,
-    )
-    matcher._read = AsyncMock(
-        side_effect=[
-            [type("Item", (), {"record": first})()],
-            [type("Item", (), {"record": later})()],
-        ]
-    )
+async def test_recovery_after_the_inbound_genesis_is_removed_needs_a_checkpoint(
+    settings: Settings, clean_redis
+):
+    """Losing the start of the inbound stream is safe exactly when a checkpoint covers it.
 
-    with pytest.raises(RuntimeError, match="begins at genesis"):
-        await matcher.recover()
+    With one, the matcher restores it and replays only the tail. Without one, the retained
+    stream is a partial history and recovery is refused rather than forking the engine
+    (Open Issue 020).
+    """
+    redis = await feed(settings, [submit(coid=1, user=10, side=BUY, price=100, qty=5, ts=2)])
+    first = Matcher(redis, settings)
+    first.producer.start()
+    await drain(first)
+    await first.write_checkpoint()
+    await first.producer.stop()
+
+    genesis = await redis.xrange(settings.stream_inbound, "-", "+", count=1)
+    await redis.xdel(settings.stream_inbound, genesis[0][0])
+
+    covered = Matcher(redis, settings)
+    assert await covered.recover() == 0
+    assert covered.resumed_from_checkpoint
+
+    await redis.delete(checkpoint.key(PROCESS))
+    with pytest.raises(CheckpointRefused):
+        await Matcher(redis, settings).recover()
+    await redis.aclose()
 
 
 async def test_the_gateway_writes_and_the_matcher_answers(settings: Settings, clean_redis):

@@ -145,8 +145,9 @@ python scripts/recovery_t6.py
 
 The successful run records a measurement in
 [`benchmarks/results/t6-recovery.json`](benchmarks/results/t6-recovery.json) and creates the
-animated walkthrough below. To prove the trimmed-history guard rejects a broken replay, run
-`python scripts/recovery_t6.py --negative-control`; that deliberate fault exits non-zero.
+animated walkthrough below. To prove the matcher refuses a partial history (Open Issue 020), run
+`python scripts/recovery_t6.py --negative-control`: it deletes the first inbound record and the
+matcher's checkpoint, and that deliberate fault exits non-zero.
 
 ![Task 5.3 matcher crash recovery](benchmarks/results/t6-recovery.gif)
 

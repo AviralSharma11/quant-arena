@@ -29,9 +29,10 @@ from contracts.v1.generated.contracts import Fill, OrderAccepted, Side, Tif, unp
 from services.gateway.streams import RECORD_FIELD  # noqa: E402
 
 RECOVERY_LINE = re.compile(
-    r"cpp-matcher: replayed (\d+) inbound records in ([0-9.]+)s"
+    r"cpp-matcher: (?:checkpoint|genesis) \+ (\d+) inbound records in ([0-9.]+)s"
 )
-GENESIS_ERROR = "no longer begins at genesis"
+#: What the matcher logs when it will not replay a partial history (Open Issue 020).
+REFUSED_ERROR = "CheckpointRefused"
 
 
 def free_port() -> int:
@@ -131,6 +132,13 @@ class RecoveryRun:
         self.flow_done = threading.Event()
         self.stop_requested = threading.Event()
         self.flow_thread: threading.Thread | None = None
+        #: Every outbound record, collected as it arrives. The matcher trims the stream below its
+        #: readers' checkpoints (Open Issue 020), so a read of the whole stream at the end would
+        #: miss the early fills; the collector reads ahead of trimming instead.
+        self.outbound_seen: list = []
+        self.outbound_last_id = b"0-0"
+        self.outbound_lock = threading.Lock()
+        self.collector_thread: threading.Thread | None = None
         self.initial_balance_and_fees = 2 * self.settings.initial_cash_ticks
         self.symbol = self.settings.symbols[0]
         self.price_ticks = max(
@@ -153,6 +161,7 @@ class RecoveryRun:
     def run(self) -> int:
         try:
             self.start_stack()
+            self.start_collector()
             self.create_accounts()
             if self.args.negative_control:
                 return self.run_negative_control()
@@ -258,8 +267,39 @@ class RecoveryRun:
         return cash, fees
 
     def stream_records(self) -> list:
-        entries = self.redis_client.xrange(self.settings.stream_outbound, "-", "+")
-        return [unpack_any(fields[RECORD_FIELD]) for _, fields in entries]
+        """Every outbound record so far: what was collected plus whatever is new."""
+        with self.outbound_lock:
+            while True:
+                entries = self.redis_client.xrange(
+                    self.settings.stream_outbound, b"(" + self.outbound_last_id, "+", count=1000
+                )
+                if not entries:
+                    return list(self.outbound_seen)
+                self.outbound_seen.extend(unpack_any(fields[RECORD_FIELD]) for _, fields in entries)
+                self.outbound_last_id = entries[-1][0]
+
+    def collect_outbound(self) -> None:
+        while not self.stop_requested.is_set():
+            try:
+                self.stream_records()
+            except redis.RedisError:
+                pass  # the stack is starting or stopping; the next pass catches up
+            time.sleep(0.05)
+
+    def start_collector(self) -> None:
+        self.collector_thread = threading.Thread(
+            target=self.collect_outbound, name="t6-outbound-collector", daemon=True
+        )
+        self.collector_thread.start()
+
+    def assert_nothing_trimmed_unseen(self) -> None:
+        """The collector must have read every record ever added, or the counts below lie."""
+        records = self.stream_records()
+        added = self.redis_client.xinfo_stream(self.settings.stream_outbound)["entries-added"]
+        if added != len(records):
+            raise AssertionError(
+                f"outbound collector saw {len(records)} of {added} records; trimming outran it"
+            )
 
     def submit_order(
         self,
@@ -423,6 +463,7 @@ class RecoveryRun:
                 f"outbound={self.redis_client.xlen(self.settings.stream_outbound)}\n"
                 f"matcher logs:\n{self.stack.logs()}"
             ) from exc
+        self.assert_nothing_trimmed_unseen()
         records = self.stream_records()
         accepted, fills, maker_order_id = validate_order_fills(
             records,
@@ -498,12 +539,16 @@ class RecoveryRun:
         if not first:
             raise RuntimeError("negative control needs a non-empty inbound stream")
         genesis_id = first[0][0]
-        print("[t6] Negative control: deleting the replay genesis record in the scratch stream")
+        # Deleting the first record alone is recoverable now: the matcher's checkpoint covers it.
+        # The fault that must be refused is a partial history with nothing covering the gap, so
+        # the checkpoint goes too.
+        print("[t6] Negative control: deleting the genesis record and the matcher's checkpoint")
         self.stack.command("stop", "--timeout", "0", "matcher")
         self.redis_client.xdel(self.settings.stream_inbound, genesis_id)
+        self.redis_client.delete("qa.checkpoint.matcher")
         self.stack.command("start", "matcher")
         self.wait_until(
-            lambda: GENESIS_ERROR in self.stack.logs(),
+            lambda: REFUSED_ERROR in self.stack.logs(),
             "matcher to reject the deliberately trimmed replay",
             timeout=60,
         )
@@ -548,6 +593,9 @@ class RecoveryRun:
         print(f"[t6] Recovery demonstration: {gif_path.relative_to(ROOT)}")
 
     def stop_flow(self) -> None:
+        self.stop_requested.set()
+        if self.collector_thread is not None:
+            self.collector_thread.join(timeout=5)
         if self.flow_thread is not None and self.flow_thread.is_alive():
             self.stop_requested.set()
             self.flow_thread.join(timeout=15)
@@ -808,7 +856,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--negative-control",
         action="store_true",
-        help="trim genesis in the isolated stack; expected to exit 1 when the guard catches it",
+        help="remove genesis and the matcher checkpoint in the isolated stack; expected to exit 1 when the matcher refuses",
     )
     parser.add_argument(
         "--result",
