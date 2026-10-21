@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-09-16 · **HEAD** `a4c2769` (branch `task/020-checkpointing`;
-`origin/main` is `1ebab7d`, PR #27 merged) · **Week 7**
+**Last updated:** 2026-10-21 · **HEAD** `7bb1915` (branch `fix/020-onto-main`, PR #34;
+`origin/main` is `ed7b6a0`) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
 costing 0.82% of the account. **7.3 is merged** (PR #25) — four integration tests against the
@@ -18,12 +18,13 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
-**Merge PR #29, then PR #30** (checkpointing, Open Issue 020) — Dev B · **next**
-- #29: ledger read model froze 4 h behind (full-table rewrite per batch); chart crash on
-  re-delivered bars. Verified in browser. #30: checkpointing, verified by restart-after-trim live.
-- Then pick from `BUGS.md`: BUG-001 cash scale needs a decision; BUG-002/003/004 are small.
-
-**Open the PR for `task/7.5-definition-of-done` to close Phase 1** — Dev B · **next**
+**Merge PR #34, then `down -v` once and restart with bots** — Dev B · **next**
+- #30 merged into the dead #29 branch; #34 lands 020 on `main`, removes #32's genesis guard,
+  lets `CheckpointRefused` escape #31's retry loop, keys checkpoints by `checkpoint_hash`.
+  Evidence: T6 PASS (100 fills, 0 dup, cash conserved), negative control refuses; 612 tests pass.
+- Tell Dev A about the #31/#32 changes before merging (reasoning in the PR).
+- Then: money-path PR (idempotency claim+append not atomic; fee not reserved; coid > I64_MAX
+  freezes ledger; halt stored as reject), then matcher partial-output recovery.
 
 - **`task/7.4-benchmark-report` is merged** (`1ebab7d`).
 - **`task/7.5-definition-of-done` is 1 commit ahead of `origin/main`** (`8479f3e`): `scripts/backup_postgres.sh`, `RUNBOOK.md`, `DEFINITION_OF_DONE.md`, `README.md`.
@@ -72,13 +73,11 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
   activates a second defect (`step()` respawns a dead engine with an empty book and `order_id`
   back to 1, colliding across all three consumers), so it is written up rather than patched.
 - **On a decision from me:** nothing. **External:** nothing outstanding.
-- **Balances do not survive a restart once the stream has been trimmed — needs a decision, you
-  and Dev A.** Cash grants are `CreateAccount` events on the inbound stream, trimmed at
-  `maxlen = 2000000` (`config/quant_arena.toml:134`). With no snapshots in Phase 1, a restart
-  replays only the retained window: fills without their grants. Observed 2026-09-13: 30 accounts
-  rebuilt at or below zero (`dmm_qaa` −2,716,652,209 ticks), bots crash-looping on
-  `dmm_qaa was never funded`. Cleared by `docker compose down -v`, which deletes every account.
-  It recurs after the next ~2M records. Snapshots are Phase 2, so the answer is a decision, not a patch.
+- **On Dev A:** `tests/cpp_worker.py` `return`s inside a generator fixture (errors when
+  `QA_CPP_ENGINE_PATH` is set); `test_market_maker_inventory_stays_bounded` fails on `main`;
+  no self-trade prevention; naive and C++ check rejection fields in a different order.
+- **Wrong in this file:** NOW said "merge #30" and "open the 7.5 PR"; #30 landed on a dead base
+  and 7.5 merged as #28 on 2026-09-16.
 - **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
   for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
   Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
