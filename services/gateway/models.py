@@ -11,7 +11,7 @@ INTEGER, which silently cannot hold either an int64 tick amount or a nanosecond 
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, ForeignKey, String
+from sqlalchemy import BigInteger, Column, ForeignKey, Numeric, String
 from sqlmodel import Field, SQLModel
 
 
@@ -57,7 +57,9 @@ class OpenOrder(SQLModel, table=True):
     __tablename__ = "open_orders"
 
     order_id: int = Field(sa_column=Column(BigInteger, primary_key=True))
-    client_order_id: int = Field(sa_column=Column(BigInteger, nullable=False))
+    #: NUMERIC, not BIGINT: the contract makes `client_order_id` a uint64, and a signed 64-bit
+    #: column refuses half its range — one such order failed every ledger flush for everyone.
+    client_order_id: int = Field(sa_column=Column(Numeric(20, 0), nullable=False))
     user_id: int = Field(
         sa_column=Column(BigInteger, ForeignKey("users.id"), index=True, nullable=False)
     )
@@ -77,3 +79,18 @@ class HouseFeeAccount(SQLModel, table=True):
     fee_ticks: int = Field(sa_column=Column(BigInteger, nullable=False, default=0))
     updated_at_ns: int = Field(sa_column=Column(BigInteger, nullable=False))
 
+
+#: Tables created before `open_orders.client_order_id` became NUMERIC keep their BIGINT column,
+#: because `create_all` never alters an existing table. Idempotent: a no-op once converted.
+WIDEN_CLIENT_ORDER_ID = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'open_orders' AND column_name = 'client_order_id'
+          AND data_type = 'bigint'
+    ) THEN
+        ALTER TABLE open_orders ALTER COLUMN client_order_id TYPE NUMERIC(20, 0);
+    END IF;
+END $$;
+"""

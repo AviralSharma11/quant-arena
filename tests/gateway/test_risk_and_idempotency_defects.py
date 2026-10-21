@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from config.settings import Settings
 from contracts.v1.generated.contracts import (
     OrderAccepted,
+    SubmitOrder,
     Side,
     Tif,
     unpack_any,
@@ -95,21 +96,19 @@ def _inbound_count(settings: Settings, client_order_id: int) -> int:
 def test_a_retry_while_the_original_is_in_flight_does_not_submit_a_second_order(
     logged_in: TestClient, settings: Settings
 ):
-    """Success Criterion 2. The claim was always atomic; the route threw the answer away.
+    """Success Criterion 2. A retry that arrives while the original is still in flight in this
+    gateway is answered `in_progress` and appends nothing.
 
     Simulated rather than raced, because a race that reproduces only sometimes is not a
-    regression test: the key is claimed first, so the second call is by construction the
-    retry that arrives while the original is still in flight.
+    regression test: the original's pending reservation is planted, so the second call is by
+    construction the retry that arrives mid-flight.
     """
-    import redis as redis_sync
-
     client = logged_in
-    # Plant the raw "in_progress" sentinel the Lua script writes: an original that has claimed
-    # the key and has not yet recorded an outcome. Planting it is exact where racing would be
-    # intermittent, and a flaky regression test is no regression test.
-    r = redis_sync.Redis.from_url(settings.redis_url)
-    r.set(f"qa.idempotent:1:4242", "in_progress", ex=3600)
-    r.close()
+    risk = client.app.state.risk
+    risk.pending_by_client[(1, 4242)] = Reservation(
+        user_id=1, order_id=None, client_order_id=4242, symbol_id=1,
+        side=BUY, price_ticks=100, qty=1,
+    )
 
     response = client.post("/orders", json=_order(4242, price=100, qty=1))
 
@@ -118,23 +117,103 @@ def test_a_retry_while_the_original_is_in_flight_does_not_submit_a_second_order(
     assert _inbound_count(settings, 4242) == 0, "the retry must not append a second order"
 
 
-def test_only_one_caller_can_ever_win_the_claim(settings: Settings, _clean):
-    """Eight genuinely concurrent claims on one key. This is the property the whole fix rests
-    on, so it is raced for real rather than simulated — and it is deterministic in the
-    direction that matters: more than one winner can never be correct."""
+def test_concurrent_claim_and_append_appends_exactly_once(settings: Settings, _clean):
+    """Eight genuinely concurrent submissions of one key, raced for real through the producer.
+    Exactly one is appended, and every other caller is handed that one's outcome — the property
+    Open Issue 008's single script exists for."""
     from redis.asyncio import Redis
 
-    from services.gateway.idempotency import IdempotencyStore
+    from services.gateway.idempotency import IdempotencyOutcome, IdempotencyStore
+    from services.gateway.streams import HaltState, StreamProducer
 
-    async def race() -> list[bool]:
-        redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    order = SubmitOrder.new(
+        timestamp_ns=1, client_order_id=9999, user_id=1, symbol_id=1,
+        side=BUY, tif=int(Tif.GTC), price_ticks=100, qty=1,
+    )
+
+    async def race():
+        redis = Redis.from_url(settings.redis_url, decode_responses=False)
         store = IdempotencyStore(redis, 3600)
-        outcomes = await asyncio.gather(*(store.claim(1, 9999) for _ in range(8)))
+        producer = StreamProducer(redis, HaltState(), batch_max=settings.stream_batch_max)
+        producer.start()
+        results = await asyncio.gather(*(
+            producer.claim_and_append(
+                settings.stream_inbound, order,
+                idempotency_key=store.key(1, 9999), outcome_ttl_seconds=3600,
+            )
+            for _ in range(8)
+        ))
+        await producer.stop()
         await redis.aclose()
-        return [o.claimed for o in outcomes]
+        return results
 
-    won = asyncio.run(race())
-    assert sum(won) == 1, f"exactly one caller may claim the key, got {sum(won)}"
+    results = asyncio.run(race())
+    appended = [r.stream_id for r in results if r.stream_id is not None]
+    assert len(appended) == 1, f"exactly one caller may append, got {len(appended)}"
+    for duplicate in (r for r in results if r.stream_id is None):
+        outcome = IdempotencyOutcome.parse(duplicate.existing)
+        assert (outcome.status, outcome.seq) == ("accepted", appended[0])
+    assert _inbound_count(settings, 9999) == 1
+
+
+def test_a_retry_after_a_lost_reply_is_answered_and_not_appended_again(
+    logged_in: TestClient, settings: Settings
+):
+    """The window the separate claim, append and record steps left open: Redis applied the
+    order, the reply never reached the client, and the client retried. The retry must get the
+    original's `seq`, append nothing, and give back the reservation it took on the way."""
+    import redis as redis_sync
+
+    from services.gateway.streams import CLAIM_AND_APPEND_SCRIPT, RECORD_FIELD
+
+    client = logged_in
+    _await_grant(client, settings)
+    original = SubmitOrder.new(
+        timestamp_ns=1, client_order_id=4244, user_id=1, symbol_id=1,
+        side=BUY, tif=int(Tif.GTC), price_ticks=100, qty=1,
+    )
+    r = redis_sync.Redis.from_url(settings.redis_url)
+    _, seq = r.eval(
+        CLAIM_AND_APPEND_SCRIPT, 2, "qa.idempotent:1:4244", settings.stream_inbound,
+        RECORD_FIELD, original.pack(), 3600,
+    )
+    r.close()
+
+    response = client.post("/orders", json=_order(4244, price=100, qty=1))
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "client_order_id": 4244, "order_id": None, "seq": seq.decode(), "status": "accepted",
+    }
+    assert _inbound_count(settings, 4244) == 1
+    assert client.app.state.risk.reserved.get(1, 0) == 0, "the duplicate's reservation leaked"
+
+
+def test_a_halted_submission_records_nothing_and_its_retry_succeeds(
+    logged_in: TestClient, settings: Settings, monkeypatch
+):
+    """A 503 means "not processed, ask again". Storing it as a rejection answered the client's
+    correct retry with `409 EXCHANGE_HALTED` for an hour after the halt had cleared."""
+    from services.gateway.streams import ExchangeHalted, HaltReason
+
+    client = logged_in
+    _await_grant(client, settings)
+    streams = client.app.state.streams
+    real = streams.claim_and_append
+
+    async def halted_once(*args, **kwargs):
+        monkeypatch.setattr(streams, "claim_and_append", real)
+        raise ExchangeHalted(HaltReason.REDIS_UNREACHABLE)
+
+    monkeypatch.setattr(streams, "claim_and_append", halted_once)
+    first = client.post("/orders", json=_order(4245, price=100, qty=1))
+    assert first.status_code == 503
+    assert client.app.state.risk.reserved.get(1, 0) == 0
+
+    retry = client.post("/orders", json=_order(4245, price=100, qty=1))
+    assert retry.status_code == 202, retry.text
+    assert retry.json()["status"] == "accepted"
+    assert _inbound_count(settings, 4245) == 1
 
 
 def test_a_repeated_submission_still_returns_the_stored_outcome(logged_in: TestClient):
@@ -337,70 +416,64 @@ def test_the_band_is_configuration_not_a_constant(settings: Settings):
     assert state.banded_market_price(symbol_id=4, side=SELL, band_bps=1_000) == 900
 
 
-# --- the idempotency key's two lifetimes ---------------------------------------------------------
+# --- the stored outcome ------------------------------------------------------------------------
 
 
-@pytest.fixture
-def idempotency_store(settings: Settings):
-    """An `IdempotencyStore` on the test Redis, driven directly.
+def test_an_accepted_outcome_keeps_the_full_replay_ttl(logged_in: TestClient, settings: Settings):
+    """Written by the append script itself, with Open Issue 008's hour — or a legitimate retry
+    inside that hour would be processed twice."""
+    import redis as redis_sync
 
-    Directly rather than through the app, because what is under test is the TTL Redis actually
-    holds on the key — which no HTTP response reveals.
-    """
+    client = logged_in
+    _await_grant(client, settings)
+    assert client.post("/orders", json=_order(5150, price=100, qty=1)).status_code == 202
+
+    r = redis_sync.Redis.from_url(settings.redis_url)
+    ttl = r.ttl("qa.idempotent:1:5150")
+    r.close()
+    assert settings.idempotency_ttl_seconds - 60 < ttl <= settings.idempotency_ttl_seconds
+
+
+@pytest.mark.anyio
+async def test_a_rejection_never_overwrites_an_acceptance(settings: Settings, _clean):
+    """A submission that failed validation can race one with the same key that was appended.
+    The appended order is the one the client has to be told about."""
     from redis.asyncio import Redis
 
     from services.gateway.idempotency import IdempotencyStore
 
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    yield IdempotencyStore(redis, settings.idempotency_ttl_seconds)
+    redis = Redis.from_url(settings.redis_url, decode_responses=False)
+    store = IdempotencyStore(redis, 3600)
+    await redis.set(store.key(8, 5151), '{"status":"accepted","seq":"1693526400000-4"}')
+
+    stored = await store.record_rejected(8, 5151, "INSUFFICIENT_CASH")
+
+    assert (stored.status, stored.seq) == ("accepted", "1693526400000-4")
+    assert (await store.lookup(8, 5151)).status == "accepted"
+    await redis.aclose()
 
 
-@pytest.mark.anyio
-async def test_an_abandoned_claim_expires_in_seconds_not_an_hour(idempotency_store):
-    """A gateway that dies between the claim and the record must not lock the key for an hour.
+def test_the_largest_uint64_client_order_id_survives_the_read_model(logged_in: TestClient):
+    """The contract makes `client_order_id` a uint64. Stored as a signed BIGINT, one order at
+    2**63 or above failed every ledger flush and froze `/orders/open` and `/portfolio` for every
+    user. Written the way the ledger writes it, read back the way a browser reads it."""
+    from sqlalchemy import create_engine, text
 
-    One Redis key served two very different lifetimes: "a request is in flight" (milliseconds)
-    and "this answer is replayable" (Open Issue 008's hour). Writing the sentinel at the hour
-    meant a crash inside the claim-to-record window left the key holding `in_progress` with no
-    outcome — so every retry read the sentinel, got `claimed=False`, and was answered
-    `202 in_progress` for the full hour. A client following the contract exactly ("await the
-    private stream, then retry") never gets an answer and the order is neither placed nor
-    refused.
-    """
-    store = idempotency_store
-    key = store._key(7, 4242)
+    from tests.gateway.conftest import SYNC_TEST_DSN
 
-    claimed = await store.claim(7, 4242)
-    assert claimed.claimed is True
+    engine = create_engine(SYNC_TEST_DSN)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO open_orders (order_id, client_order_id, user_id, symbol_id, side, "
+                "price_ticks, qty, remaining_qty, tif, created_at_ns) "
+                "VALUES (1, :coid, 1, 1, 1, 100, 1, 1, 1, 1)"
+            ),
+            {"coid": 2**64 - 1},
+        )
+    engine.dispose()
 
-    ttl = await store.redis.ttl(key)
-    assert 0 < ttl <= store.in_flight_ttl_seconds, (
-        f"the in-flight sentinel is holding a {ttl}s TTL; it must expire in seconds so an "
-        f"abandoned claim costs the client one retry rather than an hour"
-    )
-    assert store.in_flight_ttl_seconds < store.ttl_seconds, (
-        "the sentinel must be shorter-lived than the outcome it stands in for"
-    )
-    await store.redis.aclose()
+    response = logged_in.get("/orders/open")
 
-
-@pytest.mark.anyio
-async def test_a_recorded_outcome_still_keeps_the_full_replay_ttl(idempotency_store):
-    """The short TTL is for the *claim* only. Once an answer exists it must stay replayable for
-    the window Open Issue 008 specifies, or a legitimate retry would be processed twice."""
-    store = idempotency_store
-    key = store._key(8, 5150)
-
-    await store.claim(8, 5150)
-    await store.record_accepted(8, 5150, None, "1693526400000-4")
-
-    ttl = await store.redis.ttl(key)
-    assert ttl > store.in_flight_ttl_seconds
-    assert ttl <= store.ttl_seconds
-
-    # And it replays as the same answer, which is the whole point of keeping it.
-    outcome = await store.claim(8, 5150)
-    assert outcome.status == "accepted"
-    assert outcome.seq == "1693526400000-4"
-    assert outcome.claimed is False
-    await store.redis.aclose()
+    assert response.status_code == 200, response.text
+    assert response.json()[0]["client_order_id"] == 2**64 - 1

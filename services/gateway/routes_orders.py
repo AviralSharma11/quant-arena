@@ -36,6 +36,7 @@ from services.gateway.deps import (
     RateLimit,
     Streams,
 )
+from services.gateway.idempotency import IdempotencyOutcome
 from services.gateway.ratelimit import RateLimiter
 from services.gateway.streams import ExchangeHalted
 
@@ -130,20 +131,45 @@ def _enforce_rate_limit(limiter: RateLimiter, user_id: int) -> None:
     )
 
 
-def _abandon(risk, user_id: int, client_order_id: int) -> None:
+def _abandon(risk, reservation) -> None:
     """Undo a reservation for an order that was never appended.
 
     Two things had to be undone and only one was: the committed resource, and the pending
     entry itself. Leaving the entry behind meant a later `OrderAccepted` — for a *different*
     order that happened to reuse the id after the idempotency TTL — could adopt a reservation
-    belonging to an order that never existed.
+    belonging to an order that never existed. The entry is removed only if it is still this
+    request's own, so abandoning can never take another request's reservation with it.
 
     It also poked `reserved` directly, which is right for a buy and silently wrong for a sell.
     Going through `release` means the resource is chosen by the reservation, not by the caller.
     """
-    reservation = risk.pending_by_client.pop((user_id, client_order_id), None)
-    if reservation is not None:
-        risk.release(reservation, reservation.qty)
+    key = (reservation.user_id, reservation.client_order_id)
+    if risk.pending_by_client.get(key) is reservation:
+        del risk.pending_by_client[key]
+    risk.release(reservation, reservation.qty)
+
+
+def _in_progress(client_order_id: int) -> AcknowledgementResponse:
+    return AcknowledgementResponse(
+        client_order_id=client_order_id, order_id=None, seq="", status="in_progress"
+    )
+
+
+def _answer(client_order_id: int, outcome: IdempotencyOutcome) -> AcknowledgementResponse:
+    """Reply with a stored outcome: the same `client_order_id` always gets the same answer."""
+    if outcome.status == "accepted":
+        return AcknowledgementResponse(
+            client_order_id=client_order_id,
+            order_id=outcome.order_id,
+            seq=outcome.seq,
+            status="accepted",
+        )
+    if outcome.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"status": "rejected", "reason": outcome.reason},
+        )
+    return _in_progress(client_order_id)
 
 
 @router.post("/orders", status_code=status.HTTP_202_ACCEPTED)
@@ -160,38 +186,20 @@ async def submit_order(
     # Task 4.4 forbids special-casing them anywhere in the gateway.
     _enforce_rate_limit(limiter, user_id)
 
-    # Step 1: claim the idempotency key
-    outcome = await idempotency.claim(user_id, body.client_order_id)
-
-    # If this is a duplicate (not in_progress), return the stored outcome
-    if outcome.status == "accepted":
-        # Retry after acceptance: return the same order_id and seq
-        return AcknowledgementResponse(
-            client_order_id=body.client_order_id,
-            order_id=outcome.order_id,
-            seq=outcome.seq,
-            status="accepted",
-        )
-    elif outcome.status == "rejected":
-        # Retry after rejection: return the same rejection
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"status": "rejected", "reason": outcome.reason},
-        )
-    # Otherwise the status is in_progress.
-    # A retry that arrived while the original is still in flight. It must not submit
-    # alongside it: a duplicate here is a real trade against a real counterparty whose
-    # position also moved, and it cannot be undone without unwinding someone else's fill
-    # (Open Issue 008). The client is told to ask again, not answered with a second order.
-    if not outcome.claimed:
-        return AcknowledgementResponse(
-            client_order_id=body.client_order_id,
-            order_id=None,
-            seq="",
-            status="in_progress",
-        )
+    # Step 1: an early answer for a retry of something already decided. Read-only — the claim
+    # itself is made by the append script below, where Redis decides any race (Open Issue 008).
+    outcome = await idempotency.lookup(user_id, body.client_order_id)
+    if outcome is not None:
+        return _answer(body.client_order_id, outcome)
 
     risk = request.app.state.risk
+
+    # A retry that arrived while the original is still in flight in this gateway. It must not
+    # submit alongside it: a duplicate here is a real trade against a real counterparty whose
+    # position also moved, and it cannot be undone without unwinding someone else's fill
+    # (Open Issue 008). The client is told to ask again, not answered with a second order.
+    if (user_id, body.client_order_id) in risk.pending_by_client:
+        return _in_progress(body.client_order_id)
 
     # Step 2: the symbol must exist. `symbol_id` was only ever range-checked against the
     # contract's i16 until now; the registry that makes a lookup possible arrived with
@@ -199,12 +207,9 @@ async def submit_order(
     # is money-blind and registry-free by design (`services/matcher/adapter.py`), and because a
     # rejection recorded against the idempotency key is one the client can retry into.
     if body.symbol_id not in {symbol.symbol_id for symbol in settings.symbols}:
-        await idempotency.record_rejected(
-            user_id, body.client_order_id, "UNKNOWN_SYMBOL"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"status": "rejected", "reason": "UNKNOWN_SYMBOL"},
+        return _answer(
+            body.client_order_id,
+            await idempotency.record_rejected(user_id, body.client_order_id, "UNKNOWN_SYMBOL"),
         )
 
     # Step 3: a market order becomes a marketable limit order, banded off the opposing side.
@@ -220,12 +225,9 @@ async def submit_order(
             # Nothing resting on the other side. There is no reference price, so there is no
             # band, so there is no safe price to send — Success Criterion 6 is precisely that
             # a market order into a thin book cannot execute outside its band.
-            await idempotency.record_rejected(
-                user_id, body.client_order_id, "INVALID_PRICE"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"status": "rejected", "reason": "INVALID_PRICE"},
+            return _answer(
+                body.client_order_id,
+                await idempotency.record_rejected(user_id, body.client_order_id, "INVALID_PRICE"),
             )
         # A market order that rested would not be a market order. Anything it cannot trade
         # against the book on arrival is cancelled rather than left sitting at the band price.
@@ -242,10 +244,9 @@ async def submit_order(
         qty=body.qty,
     )
     if reason is not None:
-        await idempotency.record_rejected(user_id, body.client_order_id, reason.name)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"status": "rejected", "reason": reason.name},
+        return _answer(
+            body.client_order_id,
+            await idempotency.record_rejected(user_id, body.client_order_id, reason.name),
         )
 
     # Step 5: reserve the cash, at the price that will actually be sent
@@ -259,7 +260,7 @@ async def submit_order(
         price_ticks=price_ticks,
         qty=body.qty,
     )
-    risk.reserve(
+    reservation = risk.reserve(
         user_id=user_id,
         client_order_id=body.client_order_id,
         symbol_id=body.symbol_id,
@@ -268,37 +269,41 @@ async def submit_order(
         qty=body.qty,
     )
 
-    # Step 6: append to stream (claim and append are atomic via the idempotency key)
+    # Step 6: claim the key and append, as one script. Either both happen or neither does.
     try:
-        stream_id = await streams.append(settings.stream_inbound, order)
+        appended = await streams.claim_and_append(
+            settings.stream_inbound,
+            order,
+            idempotency_key=idempotency.key(user_id, body.client_order_id),
+            outcome_ttl_seconds=idempotency.ttl_seconds,
+        )
     except ExchangeHalted as halted:
         # The exchange cannot durably record this. Fail loudly rather than time out silently,
-        # or worse, accept an order that was never written (Open Issue 003 §8.5).
-        _abandon(risk, user_id, body.client_order_id)
-        await idempotency.record_rejected(
-            user_id, body.client_order_id, "EXCHANGE_HALTED"
-        )
+        # or worse, accept an order that was never written (Open Issue 003 §8.5). Nothing is
+        # stored against the key: a 503 means "not processed, ask again", and the retry must
+        # be free to succeed once the halt clears.
+        _abandon(risk, reservation)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
-    except Exception:
-        _abandon(risk, user_id, body.client_order_id)
-        await idempotency.record_rejected(
-            user_id, body.client_order_id, "INTERNAL_ERROR"
-        )
+    except BaseException:
+        # Including a reply lost after Redis ran the script. Releasing is still right: if the
+        # order was appended, its `OrderAccepted` arrives with no pending entry and the replay
+        # path re-reserves it, and the client's retry finds the stored outcome.
+        _abandon(risk, reservation)
         raise
 
-    # Step 7: record the acceptance
-    # Note: order_id is None because the engine assigns it; we store None (not 0)
-    await idempotency.record_accepted(
-        user_id, body.client_order_id, None, stream_id
-    )
+    # Step 7: release on duplicate. The key already held an outcome, so this order was not
+    # appended and its reservation is given back; the client gets the original's answer.
+    if appended.stream_id is None:
+        _abandon(risk, reservation)
+        return _answer(body.client_order_id, IdempotencyOutcome.parse(appended.existing))
 
     return AcknowledgementResponse(
         client_order_id=order.client_order_id,
         order_id=None,
-        seq=stream_id,
+        seq=appended.stream_id,
         status="accepted",
     )
 
@@ -322,7 +327,7 @@ async def get_open_orders(user_id: CurrentUser, db: DbSession) -> list[OpenOrder
     return [
         OpenOrderItem(
             order_id=o.order_id,
-            client_order_id=o.client_order_id,
+            client_order_id=int(o.client_order_id),
             user_id=o.user_id,
             symbol_id=o.symbol_id,
             side=o.side,
@@ -371,37 +376,11 @@ async def cancel_order(
     if not 0 <= target_client_order_id <= U64_MAX:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "target_client_order_id out of range")
 
-    # Step 1: claim the idempotency key for the cancel
-    outcome = await idempotency.claim(user_id, body.client_order_id)
-
-    # If this is a duplicate cancel (not in_progress), return the stored outcome
-    if outcome.status == "accepted":
-        # Retry after acceptance: return the same seq
-        return AcknowledgementResponse(
-            client_order_id=body.client_order_id,
-            order_id=None,
-            seq=outcome.seq,
-            status="accepted",
-        )
-    elif outcome.status == "rejected":
-        # Retry after rejection: return the same rejection
-        # (Note: cancels are no-ops so rejections are rare, but handle for uniformity)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"status": "rejected", "reason": outcome.reason},
-        )
-    # Otherwise the status is in_progress.
-    # A retry that arrived while the original is still in flight. It must not submit
-    # alongside it: a duplicate here is a real trade against a real counterparty whose
-    # position also moved, and it cannot be undone without unwinding someone else's fill
-    # (Open Issue 008). The client is told to ask again, not answered with a second order.
-    if not outcome.claimed:
-        return AcknowledgementResponse(
-            client_order_id=body.client_order_id,
-            order_id=None,
-            seq="",
-            status="in_progress",
-        )
+    # Step 1: an early answer for a retry of a cancel already decided. Read-only; the claim is
+    # made by the append script, exactly as for an order.
+    outcome = await idempotency.lookup(user_id, body.client_order_id)
+    if outcome is not None:
+        return _answer(body.client_order_id, outcome)
 
     # Step 2: append the cancel to the stream
     cancel = CancelOrder.new(
@@ -411,26 +390,21 @@ async def cancel_order(
         target_client_order_id=target_client_order_id,
     )
     try:
-        stream_id = await streams.append(settings.stream_inbound, cancel)
-    except ExchangeHalted as halted:
-        # Record the failure
-        await idempotency.record_rejected(
-            user_id, body.client_order_id, "EXCHANGE_HALTED"
+        appended = await streams.claim_and_append(
+            settings.stream_inbound,
+            cancel,
+            idempotency_key=idempotency.key(user_id, body.client_order_id),
+            outcome_ttl_seconds=idempotency.ttl_seconds,
         )
+    except ExchangeHalted as halted:
+        # Nothing stored against the key: the retry must be free to succeed after the halt.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "halted", "reason": halted.reason},
         ) from halted
-    except Exception:
-        await idempotency.record_rejected(
-            user_id, body.client_order_id, "INTERNAL_ERROR"
-        )
-        raise
-
-    # Step 3: record the acceptance
-    await idempotency.record_accepted(
-        user_id, body.client_order_id, None, stream_id
-    )
+    if appended.stream_id is None:
+        return _answer(body.client_order_id, IdempotencyOutcome.parse(appended.existing))
+    stream_id = appended.stream_id
 
     # Accepted, not cancelled. Whether the order existed is the engine's answer, and it arrives
     # on the private stream — the gateway no longer knows and must not pretend to.

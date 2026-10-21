@@ -239,7 +239,7 @@ class RiskState:
             return RejectReason.INSUFFICIENT_POSITION
         return None
 
-    def reserve(self, *, user_id: int, client_order_id: int, symbol_id: int, side: int, price_ticks: int, qty: int) -> None:
+    def reserve(self, *, user_id: int, client_order_id: int, symbol_id: int, side: int, price_ticks: int, qty: int) -> Reservation:
         reason = self.reject_reason_for(
             user_id=user_id, symbol_id=symbol_id, side=side,
             price_ticks=price_ticks, qty=qty,
@@ -258,7 +258,7 @@ class RiskState:
             key = (user_id, symbol_id)
             self.reserved_qty[key] = self.reserved_qty.get(key, 0) + qty
 
-        self.pending_by_client[(user_id, client_order_id)] = Reservation(
+        reservation = Reservation(
             user_id=user_id,
             order_id=None,
             client_order_id=client_order_id,
@@ -267,6 +267,8 @@ class RiskState:
             price_ticks=price_ticks,
             qty=qty,
         )
+        self.pending_by_client[(user_id, client_order_id)] = reservation
+        return reservation
 
     def release(self, reservation: Reservation, qty: int) -> None:
         """Give back what `qty` of an order had committed. Buys hold cash, sells hold units."""
