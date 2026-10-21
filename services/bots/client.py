@@ -183,7 +183,24 @@ class BotClient:
         )
         if response.status_code == 200:
             self.user_id = response.json()["user_id"]
+            self._carry_session(response)
         return response
+
+    def _carry_session(self, login: httpx.Response) -> None:
+        """Send the session on every request ourselves, rather than leaving it to the cookie jar.
+
+        Behind TLS the gateway marks the cookie `Secure` (Task 3.3), and a client that follows
+        the cookie rules never sends a `Secure` cookie over plain http — which is how a bot
+        reaches the gateway, on the compose network behind the TLS proxy. The jar kept the
+        cookie and silently withheld it, so every request was a 401 and every bot re-logged in
+        forever while the market stood still. `Secure` protects a browser on a network it does
+        not control; a bot is a server-side client on a private one, so it carries the session
+        explicitly. Nothing in the gateway knows the difference.
+        """
+        session = "; ".join(f"{name}={value}" for name, value in login.cookies.items())
+        if session:
+            self.http.cookies.clear()
+            self.http.headers["Cookie"] = session
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """Every authenticated call goes through here. On a 401, log in again and resend once.

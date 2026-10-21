@@ -251,3 +251,29 @@ async def test_sign_in_still_names_a_wrong_password_rather_than_retrying_it():
     async with bot(handler) as client:
         with pytest.raises(RuntimeError, match="different credentials"):
             await client.sign_in(attempts=2, delay=0)
+
+
+async def test_a_secure_session_cookie_is_still_sent_to_the_gateway_over_http():
+    """The public deployment (Task 3.3) marks the session cookie `Secure`, while a bot talks to
+    the gateway over plain http on the compose network. Left to the cookie jar, the cookie was
+    never sent: every request was a 401, every bot re-logged in forever, and the market never
+    traded. The session must reach the gateway, and must not need a second login to do it."""
+    seen: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.headers.get("cookie")))
+        if request.url.path == "/auth/login":
+            return httpx.Response(
+                200, json={"user_id": 7},
+                headers={"set-cookie": "qa_session=s3cret; HttpOnly; Path=/; SameSite=strict; Secure"},
+            )
+        if request.headers.get("cookie") != "qa_session=s3cret":
+            return httpx.Response(401)
+        return httpx.Response(200, json={"cash_ticks": 1, "positions": []})
+
+    async with bot(handler) as client:
+        assert (await client._login()).status_code == 200
+        await client.refresh()
+
+    assert seen[-1] == ("/portfolio", "qa_session=s3cret")
+    assert [path for path, _ in seen].count("/auth/login") == 1, "it re-logged in to get through"
