@@ -1,7 +1,6 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-10-21 · **HEAD** `a2285c6` (branch `fix/matcher-atomic-output`;
-`origin/main` is `fcd04ae`, PR #34 merged) · **Week 7**
+**Last updated:** 2026-10-21 · **HEAD** `cdeff8c` (`main`; PRs #35–#39 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
 costing 0.82% of the account. **7.3 is merged** (PR #25) — four integration tests against the
@@ -18,12 +17,11 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
-**Merge #35, then #36 and #37; bring the stack up with bots** — Dev B · **next**
-- #35 atomic claim-and-append (008) + uint64 coid column; #36 taker fee reserved;
-  #37 matcher batch outputs in one MULTI/EXEC. Evidence in each PR.
-- Tell Dev A about #37 (their 4.2 runner) before merging.
-- After the stack is up: measure BUG-004 (crossed snapshots over 30 s); live bot-session
-  tests were not run on these branches.
+**Browser-check the public site, then pick the next follow-up** — Dev B · **next**
+- Live at https://quant-arena.indiasouthcentral.cloudapp.azure.com (Azure for Students VM,
+  `cdeff8c`). Manual browser walk (sign in, live book, order, backtest) not yet done.
+- Candidates: checkpoint-age alert (a stalled reader stops trimming → Redis OOM); archiver
+  graceful-stop overwrites its minute; copy VM backups off-box on a schedule.
 
 - **`task/7.4-benchmark-report` is merged** (`1ebab7d`).
 - **`task/7.5-definition-of-done` is 1 commit ahead of `origin/main`** (`8479f3e`): `scripts/backup_postgres.sh`, `RUNBOOK.md`, `DEFINITION_OF_DONE.md`, `README.md`.
@@ -54,8 +52,7 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## Then next
 
-1. **3.3** Deployment half — **on hold**, and blocked on a deployment target and a TLS
-   terminator, neither of which is mine to choose. See Blocked.
+(empty)
 
 ## Blocked / waiting
 
@@ -77,9 +74,6 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
   no self-trade prevention; naive and C++ check rejection fields in a different order.
 - **Wrong in this file:** NOW said "merge #30" and "open the 7.5 PR"; #30 landed on a dead base
   and 7.5 merged as #28 on 2026-09-16.
-- **On you, for 3.3:** a **deployment target** (a VM you control, with a domain), and approval
-  for a **TLS terminator + static server** — one image outside `CLAUDE.md`'s closed stack list.
-  Criterion 1 is unreachable without a host, so 3.3 cannot close on this machine alone.
 - **On Dev A — 6.3 and 6.4 have never been reported.** 7.4 is no longer among them. The existing
   ask names only 4.2, 4.3 and 5.3; these two belong in it.
 - **4.3 may now be duplicated.** 4.3 is Dev A's "Native engine benchmark (B1)" and is
@@ -100,7 +94,7 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 | Task | Own | Wk | Status | Evidence / note |
 |---|---|---|---|---|
-| 3.3  Public deployment and CI | B | 3 | todo | **half merged** `5efe462` — CI gate, nightly, multi-arch images. Criteria 1 and 3 (HTTPS, one-command redeploy) outstanding; see Deviations |
+| 3.3  Public deployment and CI | B | 3 | done | `5efe462` CI half · `633d5d3` deploy (#38) + `cdeff8c` bots fix (#39) · **4 of 4 criteria**: HTTPS from outside (Let's Encrypt cert, ports 5432/6379/8000/8001 closed), CI gate, `deploy/redeploy.sh <sha>` (run twice on the VM), per-commit suite |
 | 4.2  Engine process, Redis, replay recovery | A | 5 | A:todo | reported unfinished 2026-09-05 · `b644130` merged and live in compose |
 | 4.3  Native engine benchmark (B1) | A | 5 | A:unknown | **possible duplicate** — see Blocked |
 | 5.3  Kill-the-engine recovery script (T6) | A | 5 | A:unknown | — |
@@ -130,6 +124,8 @@ Append-only, one line each. **May not reverse anything in `CLAUDE.md`** — a re
 
 | Date | Decision | Why | Amends |
 |---|---|---|---|
+| 2026-10-21 | **Deploy on an Azure for Students VM behind Caddy** | Free with student credit; Caddy approved and added to `CLAUDE.md`'s stack list | 3.3 |
+| 2026-10-21 | **Bots send their session explicitly** | Behind TLS the cookie is `Secure`; bots reach the gateway over private http | — |
 | 2026-09-16 | **Checkpointing moved into Phase 1 (020), reversing 018 §13.1–13.2**; Dev B took over the engine/matcher work it needs | — | `CLAUDE.md` amended |
 | 2026-09-16 | **Dev B takes over 7.5** | Executed solo per explicit user direction to close Phase 1 deliverables | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
 | 2026-09-16 | **Dev B takes over 7.4** | Dev A's 7.4 was `A:unknown` since 05 Sep and blocked the joint 7.5. Your call, made explicitly rather than drifted into | schedule only; ownership in `CLAUDE.md` Appendix D unchanged |
