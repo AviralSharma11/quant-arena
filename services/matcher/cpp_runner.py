@@ -208,13 +208,18 @@ class CppMatcher:
             self.last_inbound_id,
             block_ms=self.poll_block_ms,
         )
+        if not batch:
+            return 0
+        outputs = []
         for item in batch:
-            for output in await self.engine.apply(item.record):
-                self.last_outbound_id = await self.producer.append(
-                    self.settings.stream_outbound, output
-                )
-            self.last_inbound_id = item.stream_id
-            self.records_answered += 1
+            outputs.extend(await self.engine.apply(item.record))
+        # One transaction per batch, so a record's acceptance and its fills are durable together
+        # or not at all. See `Matcher.step`; `run` recovers when this raises.
+        ids = await self.producer.append_atomic(self.settings.stream_outbound, outputs)
+        if ids:
+            self.last_outbound_id = ids[-1]
+        self.last_inbound_id = batch[-1].stream_id
+        self.records_answered += len(batch)
         return len(batch)
 
     async def maintain(self) -> None:
