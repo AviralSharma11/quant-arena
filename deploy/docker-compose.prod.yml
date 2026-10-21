@@ -1,0 +1,89 @@
+# The public deployment (Task 3.3), layered over the development stack:
+#
+#     deploy/redeploy.sh <commit-sha>
+#
+# which runs `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ...`.
+# RUNBOOK.md "Deploying to Azure" has the whole procedure.
+#
+# What changes from development, and why:
+# - **Images are pulled, never built.** CI publishes them on every merge to main; the VM has 1 GB
+#   and no business compiling C++ or running Vite. Pinned to a commit SHA — `latest` is never a
+#   deploy target, or a redeploy is not reproducible.
+# - **Only Caddy is published.** PostgreSQL, Redis, the gateway and fan-out are reachable only
+#   on the compose network. In development they are published so host tests can reach them; on a
+#   public VM that would put the database and the order log on the internet.
+# - **The session cookie is Secure again**, now that there is TLS in front.
+# - **Secrets are required.** `:?` makes compose refuse to start without them rather than fall
+#   back to the development password. They live in `.env` beside docker-compose.yml on the VM,
+#   which is gitignored.
+
+x-image: &image
+  image: ghcr.io/aviralsharma11/quant-arena-gateway:${QA_IMAGE_TAG:?set QA_IMAGE_TAG to the commit SHA to deploy}
+
+x-database-url: &database-url
+  QA_DATABASE_URL: postgresql+psycopg://quant:${QA_POSTGRES_PASSWORD:?set QA_POSTGRES_PASSWORD in .env}@postgres:5432/quant_arena
+
+services:
+  redis:
+    ports: !reset []
+
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${QA_POSTGRES_PASSWORD:?set QA_POSTGRES_PASSWORD in .env}
+
+  gateway:
+    <<: *image
+    ports: !reset []
+    environment:
+      <<: *database-url
+      QA_SESSION_COOKIE_SECURE: "true"
+
+  matcher:
+    <<: *image
+
+  ledger:
+    <<: *image
+    environment:
+      <<: *database-url
+
+  fanout:
+    <<: *image
+    ports: !reset []
+
+  archiver:
+    <<: *image
+
+  bots:
+    <<: *image
+    environment:
+      QA_BOT_PASSWORD: ${QA_BOT_PASSWORD:?set QA_BOT_PASSWORD in .env}
+
+  web:
+    image: ghcr.io/aviralsharma11/quant-arena-web:${QA_IMAGE_TAG:?set QA_IMAGE_TAG to the commit SHA to deploy}
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+      fanout:
+        condition: service_healthy
+    environment:
+      QA_DOMAIN: ${QA_DOMAIN:?set QA_DOMAIN in .env to the VM's hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Caddy's certificates and ACME account. Losing them only means re-issuing, but Let's
+      # Encrypt rate-limits re-issues, so they persist like every other store.
+      - caddydata:/data
+      - caddyconfig:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  caddydata:
+  caddyconfig:

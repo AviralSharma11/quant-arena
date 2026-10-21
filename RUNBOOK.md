@@ -203,3 +203,95 @@ python contracts/v1/generate.py --check
 ```bash
 python scripts/fetch_market_history.py --check
 ```
+
+---
+
+## 9. Deploying to Azure (public, Task 3.3)
+
+One VM runs the whole stack behind Caddy, which terminates TLS and serves the frontend. The VM
+never builds anything: CI publishes `quant-arena-gateway` and `quant-arena-web` for every merge to
+`main`, tagged with the commit SHA, and the VM pulls them. The files are `deploy/`:
+`docker-compose.prod.yml` (layered over `docker-compose.yml`), `Caddyfile`, `web.Dockerfile`,
+`redeploy.sh`, `backup.sh`.
+
+Measured footprint with bots trading: **~390 MiB** for all nine containers.
+
+### 9.1 One-time: make the images pullable
+The VM pulls anonymously, so both GHCR packages must be public (the repository already is).
+On GitHub: profile → **Packages** → `quant-arena-gateway` → **Package settings** → **Change
+visibility** → Public. Repeat for `quant-arena-web` once its first publish has run.
+
+### 9.2 One-time: create the VM (Azure portal, Azure for Students subscription)
+1. **Virtual machines → Create.**
+   - Image: **Ubuntu Server 24.04 LTS**.
+   - Size: the 1 GB burstable size your subscription lists under **free services** (B1s, or
+     B2ats v2 / B2pts v2 for ARM — the images are built for both).
+   - Authentication: **SSH public key**, username `azureuser`.
+   - Inbound ports: **SSH (22)**, **HTTP (80)**, **HTTPS (443)**.
+   - Disk: Standard SSD, the size the free services cover.
+2. After creation: **Networking → port 22 rule → Source: My IP address.** Only 80 and 443 stay
+   open to the world. PostgreSQL, Redis, the gateway and fan-out are never published by the
+   production compose file, so there is nothing else to close.
+3. **Public IP address → Configuration → DNS name label**, e.g. `quant-arena`. The hostname is
+   then `quant-arena.<region>.cloudapp.azure.com` — free, stable, and enough for Let's Encrypt.
+   Set the IP assignment to **Static** so the name never points at someone else.
+
+### 9.3 One-time: prepare the VM
+```bash
+ssh azureuser@quant-arena.<region>.cloudapp.azure.com
+
+# 2 GB of swap: the stack fits in 1 GB, but Postgres and image pulls spike.
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile
+sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker azureuser && exit          # log in again for the group to apply
+
+ssh azureuser@quant-arena.<region>.cloudapp.azure.com
+git clone https://github.com/AviralSharma11/quant-arena.git && cd quant-arena
+
+# Secrets. Gitignored; compose refuses to start without each of them.
+cat > .env <<ENV
+QA_DOMAIN=quant-arena.<region>.cloudapp.azure.com
+QA_POSTGRES_PASSWORD=$(openssl rand -hex 24)
+QA_BOT_PASSWORD=$(openssl rand -hex 24)
+ENV
+chmod 600 .env
+```
+Never change `QA_POSTGRES_PASSWORD` after the first start: PostgreSQL stores it in its volume on
+first boot and ignores the variable afterwards.
+
+### 9.4 Deploy and redeploy — one command
+```bash
+deploy/redeploy.sh <commit-sha>
+```
+Pick a commit whose **Publish images** run succeeded (`gh run list --workflow publish.yml`).
+A run cancelled by a later merge publishes nothing, and the script then stops at `pull`
+before touching anything running. Volumes are kept, so accounts and the order log survive and
+every process resumes from its checkpoint. The first start obtains the certificate, which takes
+a few seconds.
+
+Check from outside the VM:
+```bash
+curl -I https://quant-arena.<region>.cloudapp.azure.com/            # 200, valid certificate
+nc -zv -w 3 quant-arena.<region>.cloudapp.azure.com 5432           # must fail: not published
+```
+
+### 9.5 Backups — and get them off the VM
+```bash
+crontab -e      # on the VM:
+15 3 * * * cd ~/quant-arena && deploy/backup.sh >> ~/backups/backup.log 2>&1
+```
+`deploy/backup.sh` writes a PostgreSQL dump and a Redis snapshot to `~/backups`, keeping seven of
+each. Both are needed: `users` exists only in PostgreSQL, and balances older than the newest
+checkpoint exist only in Redis. **Copy them off the VM regularly**, from your own machine:
+```bash
+scp -r azureuser@quant-arena.<region>.cloudapp.azure.com:~/backups ./azure-backups
+```
+When the student credit runs out, Azure disables the VM rather than billing; backups on its disk
+go with it.
+
+### 9.6 Watching the credit
+**Cost Management → Cost analysis** on the Azure for Students subscription. The VM itself may be
+covered by free services; the static public IP and disk draw on the credit. Re-check before the
+subscription's renewal date.

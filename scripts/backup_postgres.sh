@@ -3,16 +3,15 @@
 # Quant Arena - PostgreSQL Backup Script
 #
 # ARCHITECTURAL NOTE:
-# In Quant Arena, PostgreSQL is strictly a derived read model (see ARCHITECTURE.md
-# and Open Issue 004). The source of truth for the exchange state is the Redis
-# append-only event stream. Relational tables (accounts, positions, open_orders,
-# house_fees) are projected from outbound stream events by the ledger service.
-# If PostgreSQL is lost or reset, the state can be completely reconstructed by
-# replaying the retained stream.
-#
-# Consequently, this backup script provides an operational convenience for fast
-# local restores, testing, and disaster recovery baselines — it is NOT a primary
-# durability requirement for the exchange core.
+# The trading tables (accounts, positions, open_orders, house_fees) are a derived
+# read model, projected from the outbound stream by the ledger (Open Issue 004).
+# Two things are NOT rebuildable and make this backup necessary, not a convenience:
+#   - `users` (logins, and the id sequence that numbers every account) exists only
+#     here; nothing on the stream carries it.
+#   - The stream is trimmed below every process's checkpoint (Open Issue 020), so
+#     it no longer holds history from genesis to replay the read model from.
+# For the public deployment, deploy/backup.sh runs this together with a Redis
+# snapshot; restoring the exchange needs both.
 # ==============================================================================
 set -euo pipefail
 
@@ -67,8 +66,8 @@ Environment Variables:
   QA_POSTGRES_PORT       Default database port for direct mode (default: 5432)
 
 Architectural Note:
-  PostgreSQL is a derived read model rebuildable from the Redis event stream.
-  Backups are an operational convenience, not a primary durability requirement.
+  `users` exists only in PostgreSQL, and the stream is trimmed below checkpoints,
+  so this backup is required. deploy/backup.sh pairs it with a Redis snapshot.
 EOF
 }
 

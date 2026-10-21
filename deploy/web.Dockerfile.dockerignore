@@ -1,0 +1,9 @@
+# Used instead of the root .dockerignore when building deploy/web.Dockerfile. Only the frontend
+# sources and the Caddyfile go in; the host's node_modules never do, since they are built for the
+# host's platform rather than the image's.
+*
+!web
+!deploy/Caddyfile
+web/node_modules
+web/dist
+web/**/* 2.*

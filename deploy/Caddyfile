@@ -1,0 +1,31 @@
+# The public entry point (Task 3.3): TLS, the built frontend, and the two services a browser
+# talks to — all on one origin. One origin is not a convenience: the session cookie is
+# `SameSite=strict` and `Secure` (Open Issue 015), so the page, the API and the WebSocket must
+# share a scheme and host, which is also why `web/vite.config.ts` proxies the same paths in dev.
+#
+# `QA_DOMAIN` is the VM's hostname, e.g. `quant-arena.centralindia.cloudapp.azure.com`. Caddy
+# obtains and renews its Let's Encrypt certificate itself; nothing else in the stack sees TLS.
+
+{$QA_DOMAIN} {
+	encode zstd gzip
+
+	# The gateway. Same list as the dev proxy in web/vite.config.ts.
+	@gateway path /auth/* /orders /orders/* /symbols /symbols/* /portfolio /backtests /backtests/* /health
+	handle @gateway {
+		reverse_proxy gateway:8000
+	}
+
+	# Fan-out, a separate process by settled decision (Open Issue 006). Caddy passes the
+	# WebSocket upgrade through as is.
+	handle /stream {
+		reverse_proxy fanout:8001
+	}
+
+	# Everything else is the single-page app; unknown paths fall back to index.html so the
+	# client-side router can resolve /backtest and friends.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
