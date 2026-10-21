@@ -199,15 +199,19 @@ class Matcher:
         batch = await self._read(
             self.settings.stream_inbound, self.last_inbound_id, block_ms=self.poll_block_ms
         )
-        for item in batch:
-            for out in self.matcher.apply(item.record):
-                self.last_outbound_id = await self.producer.append(
-                    self.settings.stream_outbound, out
-                )
-            # Advanced only after every outbound record is durable. A crash mid-record replays
-            # that record on restart, and the anchor count is what makes that safe.
-            self.last_inbound_id = item.stream_id
-            self.records_answered += 1
+        if not batch:
+            return 0
+        outputs = [out for item in batch for out in self.matcher.apply(item.record)]
+        # The whole batch's outputs in one transaction: durable together or not at all. That is
+        # what makes the anchor count exact — an anchor on the stream means every record its
+        # input produced is there too — and a failure here leaves the matcher ahead of the
+        # stream, which only `recover()` can reconcile (see `run`).
+        ids = await self.producer.append_atomic(self.settings.stream_outbound, outputs)
+        if ids:
+            self.last_outbound_id = ids[-1]
+        # Advanced only after every outbound record is durable.
+        self.last_inbound_id = batch[-1].stream_id
+        self.records_answered += len(batch)
         return len(batch)
 
     async def run(self) -> None:
@@ -220,8 +224,26 @@ class Matcher:
             except asyncio.CancelledError:
                 break
             except Exception:  # noqa: BLE001 — a bad record must not kill the exchange
-                logger.exception("matcher step failed at %s; retrying", self.last_inbound_id)
-                await asyncio.sleep(0.1)
+                # The book has already moved past what reached the stream: retrying `step` would
+                # apply the same records a second time on top of it. Rebuild from the checkpoint
+                # and the durable answers first, exactly as the C++ runner does.
+                logger.exception("matcher step failed at %s; recovering", self.last_inbound_id)
+                while not self._stop.is_set():
+                    try:
+                        replayed = await self.recover()
+                    except asyncio.CancelledError:
+                        return
+                    except checkpoint.CheckpointRefused:
+                        raise  # the history is gone; exit rather than retry it forever
+                    except Exception:  # noqa: BLE001 — Redis may still be restarting
+                        logger.exception("matcher recovery failed")
+                        await asyncio.sleep(0.1)
+                    else:
+                        logger.info(
+                            "matcher recovered %d inbound records; resuming at %s",
+                            replayed, self.last_inbound_id,
+                        )
+                        break
 
     def start(self) -> None:
         if self._task is None:

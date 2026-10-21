@@ -228,6 +228,35 @@ class StreamProducer:
             )
         )
 
+    async def append_atomic(self, stream: str, records: list) -> list[str]:
+        """Append `records` as one `MULTI/EXEC`: all of them become durable, or none do.
+
+        For a writer whose records belong together — the matcher, whose inbound record answers
+        with an `OrderAccepted` and the fills it caused. Appended one `XADD` at a time, a crash
+        between them left the acceptance on the stream without its fills, and recovery, which
+        counts acceptances, then treated the record as fully answered and the fills were never
+        written. A transaction is also invisible to readers until it is whole, so no consumer
+        sees an order on the book before the fills that took it off.
+
+        Not queued: atomicity is per call, so it does not share a pipeline with other appends.
+        """
+        if not records:
+            return []
+        if self._halt.halted:
+            raise ExchangeHalted(self._halt.reason or HaltReason.REDIS_UNREACHABLE)
+        try:
+            pipe = self._redis.pipeline(transaction=True)
+            for record in records:
+                pipe.xadd(stream, {RECORD_FIELD: record.pack()}, maxlen=self._maxlen, approximate=True)
+            ids = await pipe.execute()
+        except UNREACHABLE as exc:
+            self._halt.halt(HaltReason.REDIS_UNREACHABLE, str(exc))
+            raise ExchangeHalted(HaltReason.REDIS_UNREACHABLE) from exc
+        self.batches_flushed += 1
+        self.records_written += len(records)
+        self.max_batch = max(self.max_batch, len(records))
+        return [_text(stream_id) for stream_id in ids]
+
     @staticmethod
     def _future() -> asyncio.Future:
         return asyncio.get_running_loop().create_future()
