@@ -52,7 +52,24 @@ from contracts.v1.generated.contracts import (
     Side,
 )
 from services.gateway.streams import read_records
-from services.ledger.ledger import calculate_fees
+from services.ledger.ledger import BPS_DENOMINATOR, TAKER_FEE_BPS, calculate_fees
+
+
+def buy_cost(price_ticks: int, qty: int) -> int:
+    """The cash a buy of `qty` at limit `price_ticks` commits: notional plus the worst fee.
+
+    The fee is the taker's, rounded **up per unit**, so the cost is linear in `qty`. That is what
+    lets partial fills release exactly what was reserved, with no tick stranded by rounding — a
+    fee rounded once over the whole quantity would not split evenly across fills.
+
+    It always covers what a fill charges. A buy never fills above its limit, the maker fee is
+    smaller than the taker's, and `calculate_fees` floors over the fill, so `notional + fee`
+    charged is at most `buy_cost` of the filled quantity — and `settled_cash - reserved` never
+    goes negative. Reserving notional alone let an account that spent its whole balance end
+    up to `TAKER_FEE_BPS` below zero.
+    """
+    fee_per_unit = -(-price_ticks * TAKER_FEE_BPS // BPS_DENOMINATOR)
+    return qty * (price_ticks + fee_per_unit)
 
 
 @dataclass
@@ -122,7 +139,7 @@ class RiskState:
         reserved_qty = dict(self.reserved_qty)
         for pending in self.pending_by_client.values():
             if pending.side == int(Side.BUY):
-                reserved[pending.user_id] = reserved.get(pending.user_id, 0) - pending.price_ticks * pending.qty
+                reserved[pending.user_id] = reserved.get(pending.user_id, 0) - buy_cost(pending.price_ticks, pending.qty)
             else:
                 key = (pending.user_id, pending.symbol_id)
                 reserved_qty[key] = reserved_qty.get(key, 0) - pending.qty
@@ -146,13 +163,21 @@ class RiskState:
         raw = json.loads(data)
         self.last_seq = raw["last_seq"]
         self.settled_cash = {int(u): int(v) for u, v in raw["settled_cash"]}
-        self.reserved = {int(u): int(v) for u, v in raw["reserved"]}
         self.positions = {(int(u), int(s)): int(q) for u, s, q in raw["positions"]}
         self.reserved_qty = {(int(u), int(s)): int(q) for u, s, q in raw["reserved_qty"]}
         self.pending_by_client = {}
         self.open_orders = {
             int(fields[1]): Reservation(*fields) for fields in raw["open_orders"]
         }
+        # Recomputed from the resting buys rather than read back. The total is derived state,
+        # and a checkpoint written under an older cost rule — before fees were reserved —
+        # would otherwise be released under the new one and leave old orders mis-reserved.
+        self.reserved = {}
+        for reservation in self.open_orders.values():
+            if reservation.side == int(Side.BUY):
+                self.reserved[reservation.user_id] = self.reserved.get(
+                    reservation.user_id, 0
+                ) + buy_cost(reservation.price_ticks, reservation.qty)
 
     def best_ask(self, symbol_id: int) -> int | None:
         """Lowest resting sell for a symbol, or None when nothing is offered.
@@ -227,7 +252,7 @@ class RiskState:
         opinion waiting to disagree.
         """
         if side == int(Side.BUY):
-            if self.available_cash(user_id) < price_ticks * qty:
+            if self.available_cash(user_id) < buy_cost(price_ticks, qty):
                 return RejectReason.INSUFFICIENT_CASH
             return None
 
@@ -249,7 +274,7 @@ class RiskState:
 
         if side == int(Side.BUY):
             self.reserved[user_id] = (
-                self.reserved.get(user_id, 0) + price_ticks * qty
+                self.reserved.get(user_id, 0) + buy_cost(price_ticks, qty)
             )
         else:
             # Reserved for a market maker too, even though nothing checks it. The release
@@ -279,7 +304,7 @@ class RiskState:
                 # At the limit price the reservation was taken at, never the fill price.
                 # Releasing at the fill strands the price improvement for the life of the
                 # process (Task 3.1, Success Criterion 2).
-                - reservation.price_ticks * qty,
+                - buy_cost(reservation.price_ticks, qty),
             )
             return
         key = (reservation.user_id, reservation.symbol_id)
@@ -344,7 +369,7 @@ class RiskState:
                 if reservation.side == int(Side.BUY):
                     self.reserved[record.user_id] = self.reserved.get(
                         record.user_id, 0
-                    ) + record.price_ticks * record.qty
+                    ) + buy_cost(record.price_ticks, record.qty)
                 else:
                     key = (record.user_id, record.symbol_id)
                     self.reserved_qty[key] = (

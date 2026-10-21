@@ -24,7 +24,8 @@ from contracts.v1.generated.contracts import (
     unpack_any,
 )
 from services.gateway.app import create_app
-from services.gateway.risk import Reservation, RiskState
+from services.gateway.risk import Reservation, RiskState, buy_cost
+from services.ledger.ledger import TAKER_FEE_BPS
 
 BUY, SELL = int(Side.BUY), int(Side.SELL)
 
@@ -247,8 +248,8 @@ def test_replaying_an_accepted_order_restores_the_reservation():
         )
     )
 
-    assert state.reserved[1] == 60_000
-    assert state.available_cash(1) == 940_000
+    assert state.reserved[1] == buy_cost(100, 600)
+    assert state.available_cash(1) == 1_000_000 - buy_cost(100, 600)
 
 
 def test_a_rebuilt_reservation_is_not_double_counted_when_it_was_observed_live():
@@ -257,7 +258,7 @@ def test_a_rebuilt_reservation_is_not_double_counted_when_it_was_observed_live()
     state = RiskState()
     state.settled_cash[1] = 1_000_000
     state.reserve(user_id=1, client_order_id=1, symbol_id=1, side=BUY, price_ticks=100, qty=600)
-    assert state.reserved[1] == 60_000
+    assert state.reserved[1] == buy_cost(100, 600)
 
     state.apply(
         OrderAccepted.new(
@@ -266,7 +267,7 @@ def test_a_rebuilt_reservation_is_not_double_counted_when_it_was_observed_live()
         )
     )
 
-    assert state.reserved[1] == 60_000, "the confirmation must not reserve again"
+    assert state.reserved[1] == buy_cost(100, 600), "the confirmation must not reserve again"
 
 
 def test_a_restarted_gateway_still_refuses_an_order_it_has_no_cash_for(
@@ -286,8 +287,12 @@ def test_a_restarted_gateway_still_refuses_an_order_it_has_no_cash_for(
     _await_grant(client, settings)
 
     grant = settings.initial_cash_ticks
-    assert client.post("/orders", json=_order(1, price=grant - 1_000, qty=1)).status_code == 202
-    # Only 1,000 ticks are left uncommitted.
+    # The dearest single unit that leaves about 1,000 ticks uncommitted once its fee is reserved.
+    price = (grant - 1_000) * 10_000 // (10_000 + TAKER_FEE_BPS)
+    while buy_cost(price + 1, 1) <= grant - 1_000:
+        price += 1
+    assert client.post("/orders", json=_order(1, price=price, qty=1)).status_code == 202
+    # Only about 1,000 ticks are left uncommitted.
     assert client.post("/orders", json=_order(2, price=2_000, qty=1)).status_code == 409
 
     # The matcher acknowledges the order, exactly as it does in the running stack. Until the
