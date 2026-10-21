@@ -1,7 +1,7 @@
 # Status — Quant Arena, Dev B
 
-**Last updated:** 2026-10-21 · **HEAD** `7bb1915` (branch `fix/020-onto-main`, PR #34;
-`origin/main` is `ed7b6a0`) · **Week 7**
+**Last updated:** 2026-10-21 · **HEAD** `a2285c6` (branch `fix/matcher-atomic-output`;
+`origin/main` is `fcd04ae`, PR #34 merged) · **Week 7**
 **State:** Weeks 5 and 6 closed — see Archive. **7.1 and 7.2 are merged** (PRs #21, #22), so all
 three screens are built; on QAA the strategy loses 0.72% against the market's 0.87%, fees alone
 costing 0.82% of the account. **7.3 is merged** (PR #25) — four integration tests against the
@@ -18,13 +18,12 @@ serves ten symbols on one `config_hash`. **Contracts (1.1) FROZEN 2026-08-31**, 
 
 ## NOW
 
-**Merge PR #34, then `down -v` once and restart with bots** — Dev B · **next**
-- #30 merged into the dead #29 branch; #34 lands 020 on `main`, removes #32's genesis guard,
-  lets `CheckpointRefused` escape #31's retry loop, keys checkpoints by `checkpoint_hash`.
-  Evidence: T6 PASS (100 fills, 0 dup, cash conserved), negative control refuses; 612 tests pass.
-- Tell Dev A about the #31/#32 changes before merging (reasoning in the PR).
-- Then: money-path PR (idempotency claim+append not atomic; fee not reserved; coid > I64_MAX
-  freezes ledger; halt stored as reject), then matcher partial-output recovery.
+**Merge #35, then #36 and #37; bring the stack up with bots** — Dev B · **next**
+- #35 atomic claim-and-append (008) + uint64 coid column; #36 taker fee reserved;
+  #37 matcher batch outputs in one MULTI/EXEC. Evidence in each PR.
+- Tell Dev A about #37 (their 4.2 runner) before merging.
+- After the stack is up: measure BUG-004 (crossed snapshots over 30 s); live bot-session
+  tests were not run on these branches.
 
 - **`task/7.4-benchmark-report` is merged** (`1ebab7d`).
 - **`task/7.5-definition-of-done` is 1 commit ahead of `origin/main`** (`8479f3e`): `scripts/backup_postgres.sh`, `RUNBOOK.md`, `DEFINITION_OF_DONE.md`, `README.md`.
